@@ -8,9 +8,10 @@ import {
   serverTimestamp,
   arrayUnion,
   getDoc,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
-import type { Match, User } from "../types";
+import type { Match, User, Relationship } from "../types";
 import { calculateMatchEloChanges } from "../utils/elo";
 
 interface MatchState {
@@ -24,7 +25,7 @@ interface MatchState {
   // Actions
   createMatch: (creatorUid: string) => Promise<string>;
   subscribeToMatch: (matchId: string) => () => void;
-  invitePlayer: (matchId: string, playerUid: string) => Promise<void>;
+  invitePlayer: (matchId: string, playerUid: string, inviterUid: string) => Promise<void>;
   assignToTeam: (
     matchId: string,
     playerUid: string,
@@ -106,10 +107,44 @@ export const useMatchStore = create<MatchState>((set, get) => {
       return unsubscribe;
     },
 
-    invitePlayer: async (matchId, playerUid) => {
-      await updateDoc(doc(db, "matches", matchId), {
-        participants: arrayUnion(playerUid),
-      });
+    invitePlayer: async (matchId, playerUid, inviterUid) => {
+      // Check if invitee trusts the inviter
+      const ids = [inviterUid, playerUid].sort();
+      const relationshipId = `${ids[0]}_${ids[1]}`;
+      const relDoc = await getDoc(doc(db, "relationships", relationshipId));
+
+      let inviteeTrustsInviter = false;
+      if (relDoc.exists()) {
+        const relationship = relDoc.data() as Relationship;
+        inviteeTrustsInviter = relationship.trusts?.[playerUid] === true;
+      }
+
+      if (inviteeTrustsInviter) {
+        // Auto-join: invitee trusts inviter, add directly to participants
+        await updateDoc(doc(db, "matches", matchId), {
+          participants: arrayUnion(playerUid),
+        });
+      } else {
+        // Create invitation: invitee doesn't trust inviter
+        const batch = writeBatch(db);
+
+        // Add to pendingInvitations on match
+        batch.update(doc(db, "matches", matchId), {
+          pendingInvitations: arrayUnion(playerUid),
+        });
+
+        // Create invitation document
+        const invitationRef = doc(collection(db, "invitations"));
+        batch.set(invitationRef, {
+          matchId,
+          inviterUid,
+          inviteeUid: playerUid,
+          status: "pending",
+          createdAt: serverTimestamp(),
+        });
+
+        await batch.commit();
+      }
     },
 
     assignToTeam: async (matchId, playerUid, team, role) => {

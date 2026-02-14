@@ -82,9 +82,19 @@ export function NewMatchPage() {
   };
 
   const handleInvite = async (friendUid: string) => {
-    if (!matchId) return;
-    await invitePlayer(matchId, friendUid);
+    if (!matchId || !user) return;
+    await invitePlayer(matchId, friendUid, user.uid);
   };
+
+  const getPlayerStatus = (friendUid: string): "ready" | "pending" | "not_invited" => {
+    if (!currentMatch) return "not_invited";
+    if (currentMatch.participants.includes(friendUid)) return "ready";
+    if (currentMatch.pendingInvitations?.includes(friendUid)) return "pending";
+    return "not_invited";
+  };
+
+  const pendingCount = currentMatch?.pendingInvitations?.length ?? 0;
+  const canGoToLobby = pendingCount === 0;
 
   const handleGoToLobby = () => {
     if (matchId) {
@@ -133,7 +143,7 @@ export function NewMatchPage() {
         ) : (
           <div className="space-y-2">
             {friends.map((friend) => {
-              const isInvited = currentMatch?.participants.includes(friend.uid);
+              const status = getPlayerStatus(friend.uid);
               return (
                 <div
                   key={friend.uid}
@@ -150,8 +160,14 @@ export function NewMatchPage() {
                       </div>
                     </div>
                   </div>
-                  {isInvited ? (
-                    <span className="text-sm text-green-400">Invited</span>
+                  {status === "ready" ? (
+                    <span className="px-2 py-0.5 text-xs rounded-full border bg-green-500/20 text-green-400 border-green-500/50">
+                      Ready
+                    </span>
+                  ) : status === "pending" ? (
+                    <span className="px-2 py-0.5 text-xs rounded-full border bg-yellow-500/20 text-yellow-400 border-yellow-500/50">
+                      Pending
+                    </span>
                   ) : (
                     <button
                       onClick={() => handleInvite(friend.uid)}
@@ -169,9 +185,16 @@ export function NewMatchPage() {
 
       <button
         onClick={handleGoToLobby}
-        className="w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium"
+        disabled={!canGoToLobby}
+        className={`w-full py-3 rounded-lg font-medium transition-colors ${
+          canGoToLobby
+            ? "bg-green-600 hover:bg-green-700"
+            : "bg-gray-600 cursor-not-allowed"
+        }`}
       >
-        Go to Lobby
+        {canGoToLobby
+          ? "Go to Lobby"
+          : `Waiting for ${pendingCount} player(s)...`}
       </button>
     </div>
   );

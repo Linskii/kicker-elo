@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
+import { Inbox } from "./Inbox";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -44,6 +45,8 @@ export function Layout({ children }: LayoutProps) {
                 </div>
 
                 <div className="flex items-center gap-4">
+                  <Inbox />
+
                   <Link
                     to="/profile"
                     className="flex items-center gap-2 text-sm"

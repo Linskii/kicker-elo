@@ -36,6 +36,7 @@ export interface Match {
   id: string;
   status: "lobby" | "live" | "completed";
   participants: string[];
+  pendingInvitations?: string[];
   redTeam: Team;
   blueTeam: Team;
   events: MatchEvent[];
@@ -43,4 +44,14 @@ export interface Match {
   createdBy: string;
   startedAt?: Timestamp;
   endedAt?: Timestamp;
+}
+
+export interface Invitation {
+  id: string;
+  matchId: string;
+  inviterUid: string;
+  inviteeUid: string;
+  status: "pending" | "accepted" | "declined";
+  createdAt: Timestamp;
+  respondedAt?: Timestamp;
 }
