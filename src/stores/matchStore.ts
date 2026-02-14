@@ -40,7 +40,7 @@ interface MatchState {
   startMatch: (matchId: string) => Promise<void>;
   addGoal: (matchId: string, team: "red" | "blue") => Promise<void>;
   swapRoles: (matchId: string, team: "red" | "blue") => Promise<void>;
-  completeMatch: (matchId: string) => Promise<void>;
+  completeMatch: (matchId: string, finalRedScore?: number, finalBlueScore?: number) => Promise<void>;
 
   // Timer
   startTimer: () => void;
@@ -184,8 +184,12 @@ export const useMatchStore = create<MatchState>((set, get) => {
       if (!match || match.status !== "live") return;
 
       const currentScore = match[`${team}Team`].score;
+      const newScore = currentScore + 1;
+      const otherTeam = team === "red" ? "blue" : "red";
+      const otherScore = match[`${otherTeam}Team`].score;
+
       await updateDoc(doc(db, "matches", matchId), {
-        [`${team}Team.score`]: currentScore + 1,
+        [`${team}Team.score`]: newScore,
         events: arrayUnion({
           type: "goal",
           team,
@@ -193,14 +197,12 @@ export const useMatchStore = create<MatchState>((set, get) => {
         }),
       });
 
-      // Check win condition after update
-      const newScore = currentScore + 1;
-      const otherTeam = team === "red" ? "blue" : "red";
-      const otherScore = match[`${otherTeam}Team`].score;
-
       // Win condition: First to 10 with 2 point lead
       if (newScore >= 10 && newScore - otherScore >= 2) {
-        await get().completeMatch(matchId);
+        // Pass the final scores to completeMatch since local state may be stale
+        const finalRedScore = team === "red" ? newScore : match.redTeam.score;
+        const finalBlueScore = team === "blue" ? newScore : match.blueTeam.score;
+        await get().completeMatch(matchId, finalRedScore, finalBlueScore);
       }
     },
 
@@ -220,12 +222,20 @@ export const useMatchStore = create<MatchState>((set, get) => {
       });
     },
 
-    completeMatch: async (matchId) => {
+    completeMatch: async (matchId, finalRedScore?, finalBlueScore?) => {
       const match = get().currentMatch;
       const participants = get().participants;
       if (!match) return;
 
       get().stopTimer();
+
+      // Use provided final scores or fall back to match state
+      const redScore = finalRedScore ?? match.redTeam.score;
+      const blueScore = finalBlueScore ?? match.blueTeam.score;
+
+      // Create team objects with correct final scores for Elo calculation
+      const redTeamWithScore = { ...match.redTeam, score: redScore };
+      const blueTeamWithScore = { ...match.blueTeam, score: blueScore };
 
       // Calculate Elo changes
       const userElos: Record<string, number> = {};
@@ -234,8 +244,8 @@ export const useMatchStore = create<MatchState>((set, get) => {
       }
 
       const eloChanges = calculateMatchEloChanges(
-        match.redTeam,
-        match.blueTeam,
+        redTeamWithScore,
+        blueTeamWithScore,
         userElos
       );
 
@@ -247,7 +257,7 @@ export const useMatchStore = create<MatchState>((set, get) => {
       });
 
       // Update each player's stats
-      const redWon = match.redTeam.score > match.blueTeam.score;
+      const redWon = redScore > blueScore;
 
       for (const [uid, change] of Object.entries(eloChanges)) {
         const user = participants[uid];
