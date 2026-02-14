@@ -31,24 +31,20 @@ service cloud.firestore {
         && request.resource.data.wins == 0
         && request.resource.data.losses == 0;
 
-      // Users can update their own profile
-      // For non-stat fields (username, etc): owner can update freely
-      // For stat fields: validate reasonable changes
+      // Users can update their own profile (non-stat fields only)
       allow update: if isOwner(userId)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['elo', 'matchesPlayed', 'wins', 'losses']);
+
+      // Allow stat updates from any match participant when a match completes
+      // This allows the match creator to update all participants' stats
+      allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['elo', 'matchesPlayed', 'wins', 'losses'])
+        && isValidEloChange(resource.data.elo, request.resource.data.elo)
+        && request.resource.data.matchesPlayed == resource.data.matchesPlayed + 1
         && (
-          // Either no stat changes
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['elo', 'matchesPlayed', 'wins', 'losses'])
+          (request.resource.data.wins == resource.data.wins + 1 && request.resource.data.losses == resource.data.losses)
           ||
-          // Or valid stat changes (from completing a match)
-          (
-            isValidEloChange(resource.data.elo, request.resource.data.elo)
-            && request.resource.data.matchesPlayed == resource.data.matchesPlayed + 1
-            && (
-              (request.resource.data.wins == resource.data.wins + 1 && request.resource.data.losses == resource.data.losses)
-              ||
-              (request.resource.data.losses == resource.data.losses + 1 && request.resource.data.wins == resource.data.wins)
-            )
-          )
+          (request.resource.data.losses == resource.data.losses + 1 && request.resource.data.wins == resource.data.wins)
         );
     }
 

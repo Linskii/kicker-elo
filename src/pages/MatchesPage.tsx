@@ -23,7 +23,7 @@ export function MatchesPage() {
     const q = query(
       collection(db, "matches"),
       where("participants", "array-contains", user.uid),
-      orderBy("startedAt", "desc"),
+      orderBy("createdAt", "desc"),
       limit(20)
     );
 

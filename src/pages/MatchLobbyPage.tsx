@@ -116,8 +116,11 @@ export function MatchLobbyPage() {
   }, [matchId, subscribeToMatch]);
 
   useEffect(() => {
-    if (currentMatch?.status === "live" && matchId) {
+    if (!matchId) return;
+    if (currentMatch?.status === "live") {
       navigate(`/match/${matchId}/live`);
+    } else if (currentMatch?.status === "completed") {
+      navigate(`/match/${matchId}/result`);
     }
   }, [currentMatch?.status, matchId, navigate]);
 

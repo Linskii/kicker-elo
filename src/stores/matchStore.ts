@@ -61,13 +61,14 @@ export const useMatchStore = create<MatchState>((set, get) => {
 
     createMatch: async (creatorUid) => {
       const matchRef = doc(collection(db, "matches"));
-      const newMatch: Omit<Match, "id"> = {
-        status: "lobby",
+      const newMatch = {
+        status: "lobby" as const,
         participants: [creatorUid],
         redTeam: { attacker: null, defender: null, score: 0 },
         blueTeam: { attacker: null, defender: null, score: 0 },
         events: [],
         createdBy: creatorUid,
+        createdAt: serverTimestamp(),
       };
 
       await setDoc(matchRef, newMatch);

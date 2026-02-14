@@ -42,6 +42,7 @@ export interface Match {
   events: MatchEvent[];
   eloChanges?: Record<string, number>;
   createdBy: string;
+  createdAt?: Timestamp;
   startedAt?: Timestamp;
   endedAt?: Timestamp;
 }
