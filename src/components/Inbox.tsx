@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import { useInvitationStore } from "../stores/invitationStore";
 import { useAuthStore } from "../stores/authStore";
 import type { Invitation } from "../types";
@@ -13,7 +12,6 @@ export function Inbox() {
     acceptInvitation,
     declineInvitation,
   } = useInvitationStore();
-  const navigate = useNavigate();
 
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -41,7 +39,6 @@ export function Inbox() {
 
   const handleAccept = async (invitation: Invitation) => {
     await acceptInvitation(invitation);
-    navigate(`/match/${invitation.matchId}`);
     setIsOpen(false);
   };
 

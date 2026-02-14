@@ -72,6 +72,21 @@ service cloud.firestore {
         && request.auth.uid in resource.data.users;
     }
 
+    // Invitations collection
+    match /invitations/{invitationId} {
+      // Invitees can read their pending invitations
+      allow read: if isAuthenticated()
+        && request.auth.uid == resource.data.inviteeUid;
+
+      // Authenticated users can create invitations where they are the inviter
+      allow create: if isAuthenticated()
+        && request.auth.uid == request.resource.data.inviterUid;
+
+      // Invitees can update (accept/decline) their invitations
+      allow update: if isAuthenticated()
+        && request.auth.uid == resource.data.inviteeUid;
+    }
+
     // Matches collection
     match /matches/{matchId} {
       // Anyone can read matches (public match history)
@@ -82,8 +97,12 @@ service cloud.firestore {
         && request.auth.uid in request.resource.data.participants;
 
       // Participants can update matches (add goals, change status, set eloChanges)
+      // Pending invitees can also update (to accept invitation and join)
       allow update: if isAuthenticated()
-        && request.auth.uid in resource.data.participants;
+        && (
+          request.auth.uid in resource.data.participants
+          || request.auth.uid in resource.data.pendingInvitations
+        );
 
       // Only allow delete if match is still in lobby status
       allow delete: if isAuthenticated()
