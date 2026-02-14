@@ -314,17 +314,24 @@ export function FriendsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => toggleTrust(rel.id, isTrusted)}
-                      className={`px-3 py-1 rounded text-sm ${
-                        isTrusted
-                          ? "bg-green-600 hover:bg-green-700"
-                          : "bg-gray-600 hover:bg-gray-500"
-                      }`}
+                    <label
+                      className="flex items-center gap-2 cursor-pointer"
                       title="Trust allows auto-join to match lobbies"
                     >
-                      {isTrusted ? "Trusted" : "Trust"}
-                    </button>
+                      <span className="text-sm text-gray-400">
+                        {isTrusted ? "Trusted" : "Trust"}
+                      </span>
+                      <div className="relative">
+                        <input
+                          type="checkbox"
+                          checked={isTrusted}
+                          onChange={() => toggleTrust(rel.id, isTrusted)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-11 h-6 bg-gray-600 rounded-full peer peer-checked:bg-green-600 transition-colors duration-300"></div>
+                        <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-300 peer-checked:translate-x-5"></div>
+                      </div>
+                    </label>
                     <button
                       onClick={() => removeFriend(rel.id)}
                       className="px-3 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-sm"
