@@ -9,7 +9,6 @@ import {
   arrayUnion,
   getDoc,
   writeBatch,
-  deleteDoc,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import type { Match, User, Relationship } from "../types";
@@ -47,8 +46,6 @@ interface MatchState {
   startTimer: () => void;
   stopTimer: () => void;
   resetTimer: () => void;
-  touchMatch: (matchId: string) => Promise<void>;
-  deleteMatch: (matchId: string) => Promise<void>;
 }
 
 export const useMatchStore = create<MatchState>((set, get) => {
@@ -72,7 +69,6 @@ export const useMatchStore = create<MatchState>((set, get) => {
         events: [],
         createdBy: creatorUid,
         createdAt: serverTimestamp(),
-        lastActivityAt: serverTimestamp(),
       };
 
       await setDoc(matchRef, newMatch);
@@ -300,16 +296,6 @@ export const useMatchStore = create<MatchState>((set, get) => {
     resetTimer: () => {
       get().stopTimer();
       set({ timer: 0 });
-    },
-
-    touchMatch: async (matchId) => {
-      await updateDoc(doc(db, "matches", matchId), {
-        lastActivityAt: serverTimestamp(),
-      });
-    },
-
-    deleteMatch: async (matchId) => {
-      await deleteDoc(doc(db, "matches", matchId));
     },
   };
 });

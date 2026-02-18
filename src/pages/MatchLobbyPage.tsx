@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -8,9 +8,9 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/core";
+import { useState } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
-import { LobbyExpiryTimer } from "../components/LobbyExpiryTimer";
 import type { User } from "../types";
 
 function PlayerCard({
@@ -105,7 +105,6 @@ export function MatchLobbyPage() {
     subscribeToMatch,
     assignToTeam,
     startMatch,
-    touchMatch,
   } = useMatchStore();
 
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -115,16 +114,6 @@ export function MatchLobbyPage() {
     const unsubscribe = subscribeToMatch(matchId);
     return () => unsubscribe();
   }, [matchId, subscribeToMatch]);
-
-  // Touch the match to reset expiry timer when visiting lobby
-  useEffect(() => {
-    if (!matchId || !currentMatch || currentMatch.status !== "lobby") return;
-    touchMatch(matchId);
-  }, [matchId, currentMatch?.status, touchMatch]);
-
-  const handleExpire = useCallback(() => {
-    navigate("/matches");
-  }, [navigate]);
 
   useEffect(() => {
     if (!matchId) return;
@@ -208,13 +197,7 @@ export function MatchLobbyPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Match Lobby</h1>
-        <LobbyExpiryTimer
-          lastActivityAt={currentMatch.lastActivityAt}
-          onExpire={handleExpire}
-        />
-      </div>
+      <h1 className="text-2xl font-bold">Match Lobby</h1>
 
       <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         {/* Unassigned Players Pool */}
