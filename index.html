@@ -8,6 +8,20 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Handle GitHub Pages SPA redirect
+      (function() {
+        const redirect = sessionStorage.getItem('gh-pages-redirect');
+        if (redirect) {
+          sessionStorage.removeItem('gh-pages-redirect');
+          const basePath = '/kicker-elo';
+          const route = redirect.startsWith(basePath) ? redirect.slice(basePath.length) : redirect;
+          if (route && route !== '/') {
+            history.replaceState(null, '', basePath + route);
+          }
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
