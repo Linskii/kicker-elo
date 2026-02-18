@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   collection,
@@ -10,10 +10,13 @@ import {
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuthStore } from "../stores/authStore";
+import { useMatchStore } from "../stores/matchStore";
+import { LobbyExpiryTimer } from "../components/LobbyExpiryTimer";
 import type { Match } from "../types";
 
 export function MatchesPage() {
   const { user } = useAuthStore();
+  const { deleteMatch } = useMatchStore();
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -44,6 +47,13 @@ export function MatchesPage() {
   const lobbyMatches = matches.filter((m) => m.status === "lobby");
   const completedMatches = matches.filter((m) => m.status === "completed");
 
+  const handleLobbyExpire = useCallback(
+    (matchId: string) => {
+      deleteMatch(matchId);
+    },
+    [deleteMatch]
+  );
+
   const MatchCard = ({ match }: { match: Match }) => {
     const isRed = match.redTeam.attacker === user.uid || match.redTeam.defender === user.uid;
     const userTeam = isRed ? "red" : "blue";
@@ -69,6 +79,12 @@ export function MatchesPage() {
           >
             {match.status.toUpperCase()}
           </span>
+          {match.status === "lobby" && (
+            <LobbyExpiryTimer
+              lastActivityAt={match.lastActivityAt}
+              onExpire={() => handleLobbyExpire(match.id)}
+            />
+          )}
           {match.status === "completed" && eloChange !== undefined && (
             <span
               className={`font-mono font-semibold ${

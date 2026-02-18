@@ -45,6 +45,7 @@ export interface Match {
   createdAt?: Timestamp;
   startedAt?: Timestamp;
   endedAt?: Timestamp;
+  lastActivityAt?: Timestamp;
 }
 
 export interface Invitation {
