@@ -7,6 +7,10 @@ import {
   type DragStartEvent,
   useDraggable,
   useDroppable,
+  TouchSensor,
+  MouseSensor,
+  useSensor,
+  useSensors,
 } from "@dnd-kit/core";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
@@ -43,7 +47,12 @@ function DraggablePlayer({ player }: { player: User }) {
   });
 
   return (
-    <div ref={setNodeRef} {...listeners} {...attributes} className="cursor-grab">
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className="cursor-grab touch-none"
+    >
       <PlayerCard player={player} isDragging={isDragging} />
     </div>
   );
@@ -110,6 +119,20 @@ export function MatchLobbyPage() {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const userRef = useRef(user);
+
+  // Configure sensors for both mouse and touch with activation constraints
+  const mouseSensor = useSensor(MouseSensor, {
+    activationConstraint: {
+      distance: 5, // 5px movement required before drag starts
+    },
+  });
+  const touchSensor = useSensor(TouchSensor, {
+    activationConstraint: {
+      delay: 150, // 150ms hold before drag starts (allows scrolling)
+      tolerance: 5, // 5px movement allowed during delay
+    },
+  });
+  const sensors = useSensors(mouseSensor, touchSensor);
   userRef.current = user;
 
   useEffect(() => {
@@ -212,7 +235,11 @@ export function MatchLobbyPage() {
     <div className="max-w-2xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">Match Lobby</h1>
 
-      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
         {/* Unassigned Players Pool */}
         <div className="bg-gray-800 rounded-lg p-4">
           <h2 className="font-semibold mb-3">
