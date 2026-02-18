@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type { Timestamp } from "firebase/firestore";
 
 const LOBBY_TIMEOUT_SECONDS = 30;
@@ -13,18 +13,23 @@ export function LobbyExpiryTimer({
   onExpire,
 }: LobbyExpiryTimerProps) {
   const [remainingSeconds, setRemainingSeconds] = useState(LOBBY_TIMEOUT_SECONDS);
+  const onExpireRef = useRef(onExpire);
+  onExpireRef.current = onExpire;
+
+  // Store lastActivityAt timestamp as milliseconds to avoid object reference issues
+  const lastActivityMs = lastActivityAt?.toMillis?.() ?? null;
 
   useEffect(() => {
     const calculateRemaining = () => {
-      if (!lastActivityAt) {
+      if (lastActivityMs === null) {
         return LOBBY_TIMEOUT_SECONDS;
       }
-      const lastActivity = lastActivityAt.toDate().getTime();
       const now = Date.now();
-      const elapsed = Math.floor((now - lastActivity) / 1000);
+      const elapsed = Math.floor((now - lastActivityMs) / 1000);
       return Math.max(0, LOBBY_TIMEOUT_SECONDS - elapsed);
     };
 
+    // Set initial value
     setRemainingSeconds(calculateRemaining());
 
     const interval = setInterval(() => {
@@ -33,12 +38,12 @@ export function LobbyExpiryTimer({
 
       if (remaining <= 0) {
         clearInterval(interval);
-        onExpire();
+        onExpireRef.current();
       }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [lastActivityAt, onExpire]);
+  }, [lastActivityMs]);
 
   const progress = remainingSeconds / LOBBY_TIMEOUT_SECONDS;
   const isWarning = progress <= 0.25;
