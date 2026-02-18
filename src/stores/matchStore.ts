@@ -7,8 +7,10 @@ import {
   onSnapshot,
   serverTimestamp,
   arrayUnion,
+  arrayRemove,
   getDoc,
   writeBatch,
+  deleteDoc,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import type { Match, User, Relationship } from "../types";
@@ -41,6 +43,10 @@ interface MatchState {
   addGoal: (matchId: string, team: "red" | "blue") => Promise<void>;
   swapRoles: (matchId: string, team: "red" | "blue") => Promise<void>;
   completeMatch: (matchId: string, finalRedScore?: number, finalBlueScore?: number) => Promise<void>;
+
+  // Lobby viewer tracking
+  joinLobby: (matchId: string, userUid: string) => Promise<void>;
+  leaveLobby: (matchId: string, userUid: string) => Promise<void>;
 
   // Timer
   startTimer: () => void;
@@ -273,6 +279,37 @@ export const useMatchStore = create<MatchState>((set, get) => {
           matchesPlayed: user.matchesPlayed + 1,
           wins: user.wins + (won ? 1 : 0),
           losses: user.losses + (won ? 0 : 1),
+        });
+      }
+    },
+
+    joinLobby: async (matchId, userUid) => {
+      await updateDoc(doc(db, "matches", matchId), {
+        viewers: arrayUnion(userUid),
+      });
+    },
+
+    leaveLobby: async (matchId, userUid) => {
+      const matchRef = doc(db, "matches", matchId);
+      const matchSnap = await getDoc(matchRef);
+
+      if (!matchSnap.exists()) return;
+
+      const match = matchSnap.data() as Match;
+
+      // Only delete if match is still in lobby status
+      if (match.status !== "lobby") return;
+
+      const currentViewers = match.viewers || [];
+      const newViewers = currentViewers.filter((uid: string) => uid !== userUid);
+
+      if (newViewers.length === 0) {
+        // Last viewer left, delete the lobby
+        await deleteDoc(matchRef);
+      } else {
+        // Remove this viewer
+        await updateDoc(matchRef, {
+          viewers: arrayRemove(userUid),
         });
       }
     },

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -8,7 +8,6 @@ import {
   useDraggable,
   useDroppable,
 } from "@dnd-kit/core";
-import { useState } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
 import type { User } from "../types";
@@ -105,24 +104,38 @@ export function MatchLobbyPage() {
     subscribeToMatch,
     assignToTeam,
     startMatch,
+    joinLobby,
+    leaveLobby,
   } = useMatchStore();
 
   const [activeId, setActiveId] = useState<string | null>(null);
+  const userRef = useRef(user);
+  userRef.current = user;
 
   useEffect(() => {
-    if (!matchId) return;
+    if (!matchId || !user) return;
     const unsubscribe = subscribeToMatch(matchId);
-    return () => unsubscribe();
-  }, [matchId, subscribeToMatch]);
+    joinLobby(matchId, user.uid);
+
+    return () => {
+      unsubscribe();
+      if (userRef.current) {
+        leaveLobby(matchId, userRef.current.uid);
+      }
+    };
+  }, [matchId, user?.uid, subscribeToMatch, joinLobby, leaveLobby]);
 
   useEffect(() => {
-    if (!matchId) return;
+    if (!matchId || loading) return;
     if (currentMatch?.status === "live") {
       navigate(`/match/${matchId}/live`);
     } else if (currentMatch?.status === "completed") {
       navigate(`/match/${matchId}/result`);
+    } else if (!currentMatch) {
+      // Match was deleted (last viewer left)
+      navigate("/matches");
     }
-  }, [currentMatch?.status, matchId, navigate]);
+  }, [currentMatch, loading, matchId, navigate]);
 
   if (loading) {
     return (

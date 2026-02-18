@@ -37,6 +37,7 @@ export interface Match {
   status: "lobby" | "live" | "completed";
   participants: string[];
   pendingInvitations?: string[];
+  viewers?: string[];
   redTeam: Team;
   blueTeam: Team;
   events: MatchEvent[];
