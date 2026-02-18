@@ -7,8 +7,7 @@ import {
   type DragStartEvent,
   useDraggable,
   useDroppable,
-  TouchSensor,
-  MouseSensor,
+  PointerSensor,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
@@ -120,19 +119,13 @@ export function MatchLobbyPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const userRef = useRef(user);
 
-  // Configure sensors for both mouse and touch with activation constraints
-  const mouseSensor = useSensor(MouseSensor, {
+  // PointerSensor handles both mouse and touch uniformly
+  const pointerSensor = useSensor(PointerSensor, {
     activationConstraint: {
-      distance: 5, // 5px movement required before drag starts
+      distance: 8, // 8px movement required before drag starts
     },
   });
-  const touchSensor = useSensor(TouchSensor, {
-    activationConstraint: {
-      delay: 150, // 150ms hold before drag starts (allows scrolling)
-      tolerance: 5, // 5px movement allowed during delay
-    },
-  });
-  const sensors = useSensors(mouseSensor, touchSensor);
+  const sensors = useSensors(pointerSensor);
   userRef.current = user;
 
   useEffect(() => {
