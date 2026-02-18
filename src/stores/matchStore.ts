@@ -47,6 +47,7 @@ interface MatchState {
   // Lobby viewer tracking
   joinLobby: (matchId: string, userUid: string) => Promise<void>;
   leaveLobby: (matchId: string, userUid: string) => Promise<void>;
+  deleteLobby: (matchId: string) => Promise<void>;
 
   // Timer
   startTimer: () => void;
@@ -312,6 +313,20 @@ export const useMatchStore = create<MatchState>((set, get) => {
           viewers: arrayRemove(userUid),
         });
       }
+    },
+
+    deleteLobby: async (matchId) => {
+      const matchRef = doc(db, "matches", matchId);
+      const matchSnap = await getDoc(matchRef);
+
+      if (!matchSnap.exists()) return;
+
+      const match = matchSnap.data() as Match;
+
+      // Only delete if match is still in lobby status
+      if (match.status !== "lobby") return;
+
+      await deleteDoc(matchRef);
     },
 
     startTimer: () => {
