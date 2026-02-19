@@ -38,18 +38,18 @@ export function PlayerProfilePopup({
           setPlayer({ uid: userDoc.id, ...userDoc.data() } as User);
         }
 
-        // Fetch player's matches and filter client-side to avoid needing composite index
+        // Fetch player's completed matches using the composite index
         const matchesQuery = query(
           collection(db, "matches"),
           where("participants", "array-contains", playerUid),
-          orderBy("createdAt", "desc"),
-          limit(50)
+          where("status", "==", "completed"),
+          orderBy("endedAt", "desc"),
+          limit(10)
         );
         const matchesSnapshot = await getDocs(matchesQuery);
-        const matchList = matchesSnapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }) as Match)
-          .filter((m) => m.status === "completed")
-          .slice(0, 10);
+        const matchList = matchesSnapshot.docs.map(
+          (doc) => ({ id: doc.id, ...doc.data() }) as Match
+        );
         setMatches(matchList);
       } catch (error) {
         console.error("Error fetching player data:", error);
