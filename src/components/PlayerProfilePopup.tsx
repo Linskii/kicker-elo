@@ -8,6 +8,9 @@ import {
   getDocs,
   doc,
   getDoc,
+  startAfter,
+  type QueryDocumentSnapshot,
+  type DocumentData,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import type { User, Match } from "../types";
@@ -23,7 +26,11 @@ export function PlayerProfilePopup({
 }: PlayerProfilePopupProps) {
   const [player, setPlayer] = useState<User | null>(null);
   const [matches, setMatches] = useState<Match[]>([]);
+  const [usernames, setUsernames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const popupRef = useRef<HTMLDivElement>(null);
 
   // Load player data and match history
@@ -48,9 +55,27 @@ export function PlayerProfilePopup({
         );
         const matchesSnapshot = await getDocs(matchesQuery);
         const matchList = matchesSnapshot.docs.map(
-          (doc) => ({ id: doc.id, ...doc.data() }) as Match
+          (d) => ({ id: d.id, ...d.data() }) as Match
         );
         setMatches(matchList);
+        setLastDoc(matchesSnapshot.docs[matchesSnapshot.docs.length - 1] || null);
+        setHasMore(matchesSnapshot.docs.length === 10);
+
+        // Fetch usernames for all participants
+        const allUids = new Set<string>();
+        matchList.forEach((m) => m.participants.forEach((uid) => allUids.add(uid)));
+        if (allUids.size > 0) {
+          const usernameMap: Record<string, string> = {};
+          await Promise.all(
+            Array.from(allUids).map(async (uid) => {
+              const uDoc = await getDoc(doc(db, "users", uid));
+              if (uDoc.exists()) {
+                usernameMap[uid] = uDoc.data().username;
+              }
+            })
+          );
+          setUsernames(usernameMap);
+        }
       } catch (error) {
         console.error("Error fetching player data:", error);
       }
@@ -60,6 +85,53 @@ export function PlayerProfilePopup({
 
     fetchData();
   }, [playerUid]);
+
+  // Load more matches
+  const loadMore = async () => {
+    if (!lastDoc || loadingMore || !hasMore) return;
+
+    setLoadingMore(true);
+    try {
+      const matchesQuery = query(
+        collection(db, "matches"),
+        where("participants", "array-contains", playerUid),
+        where("status", "==", "completed"),
+        orderBy("endedAt", "desc"),
+        startAfter(lastDoc),
+        limit(10)
+      );
+      const matchesSnapshot = await getDocs(matchesQuery);
+      const newMatches = matchesSnapshot.docs.map(
+        (d) => ({ id: d.id, ...d.data() }) as Match
+      );
+      setMatches((prev) => [...prev, ...newMatches]);
+      setLastDoc(matchesSnapshot.docs[matchesSnapshot.docs.length - 1] || null);
+      setHasMore(matchesSnapshot.docs.length === 10);
+
+      // Fetch usernames for new participants
+      const newUids = new Set<string>();
+      newMatches.forEach((m) =>
+        m.participants.forEach((uid) => {
+          if (!usernames[uid]) newUids.add(uid);
+        })
+      );
+      if (newUids.size > 0) {
+        const usernameMap: Record<string, string> = {};
+        await Promise.all(
+          Array.from(newUids).map(async (uid) => {
+            const uDoc = await getDoc(doc(db, "users", uid));
+            if (uDoc.exists()) {
+              usernameMap[uid] = uDoc.data().username;
+            }
+          })
+        );
+        setUsernames((prev) => ({ ...prev, ...usernameMap }));
+      }
+    } catch (error) {
+      console.error("Error loading more matches:", error);
+    }
+    setLoadingMore(false);
+  };
 
   // Close on click outside
   useEffect(() => {
@@ -207,59 +279,88 @@ export function PlayerProfilePopup({
                       : match.blueTeam.score > match.redTeam.score;
                     const eloChange = match.eloChanges?.[playerUid];
 
+                    const getUsername = (uid: string | null) =>
+                      uid ? usernames[uid] || "?" : null;
+
+                    const redPlayers = [
+                      getUsername(match.redTeam.attacker),
+                      getUsername(match.redTeam.defender),
+                    ].filter(Boolean);
+                    const bluePlayers = [
+                      getUsername(match.blueTeam.attacker),
+                      getUsername(match.blueTeam.defender),
+                    ].filter(Boolean);
+
                     return (
                       <div
                         key={match.id}
-                        className="flex items-center justify-between bg-gray-700 rounded-lg p-3"
+                        className="bg-gray-700 rounded-lg p-3"
                       >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-2 h-8 rounded-full ${
-                              won ? "bg-green-500" : "bg-red-500"
-                            }`}
-                          />
-                          <div className="flex items-center gap-2 text-sm">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-3">
+                            <div
+                              className={`w-2 h-8 rounded-full ${
+                                won ? "bg-green-500" : "bg-red-500"
+                              }`}
+                            />
+                            <div className="flex items-center gap-2 text-sm">
+                              <span
+                                className={`font-mono ${
+                                  isRed ? "text-red-400 font-semibold" : ""
+                                }`}
+                              >
+                                {match.redTeam.score}
+                              </span>
+                              <span className="text-gray-500">-</span>
+                              <span
+                                className={`font-mono ${
+                                  !isRed ? "text-blue-400 font-semibold" : ""
+                                }`}
+                              >
+                                {match.blueTeam.score}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {eloChange !== undefined && (
+                              <span
+                                className={`font-mono text-sm font-semibold ${
+                                  eloChange >= 0 ? "text-green-400" : "text-red-400"
+                                }`}
+                              >
+                                {eloChange >= 0 ? "+" : ""}
+                                {eloChange}
+                              </span>
+                            )}
                             <span
-                              className={`font-mono ${
-                                isRed ? "text-red-400 font-semibold" : ""
+                              className={`text-xs px-2 py-0.5 rounded ${
+                                won
+                                  ? "bg-green-600/20 text-green-400"
+                                  : "bg-red-600/20 text-red-400"
                               }`}
                             >
-                              {match.redTeam.score}
-                            </span>
-                            <span className="text-gray-500">-</span>
-                            <span
-                              className={`font-mono ${
-                                !isRed ? "text-blue-400 font-semibold" : ""
-                              }`}
-                            >
-                              {match.blueTeam.score}
+                              {won ? "W" : "L"}
                             </span>
                           </div>
                         </div>
-                        <div className="flex items-center gap-3">
-                          {eloChange !== undefined && (
-                            <span
-                              className={`font-mono text-sm font-semibold ${
-                                eloChange >= 0 ? "text-green-400" : "text-red-400"
-                              }`}
-                            >
-                              {eloChange >= 0 ? "+" : ""}
-                              {eloChange}
-                            </span>
-                          )}
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded ${
-                              won
-                                ? "bg-green-600/20 text-green-400"
-                                : "bg-red-600/20 text-red-400"
-                            }`}
-                          >
-                            {won ? "W" : "L"}
-                          </span>
+                        <div className="text-xs text-gray-400 flex items-center gap-1">
+                          <span className="text-red-400">{redPlayers.join(", ")}</span>
+                          <span className="text-gray-500">vs</span>
+                          <span className="text-blue-400">{bluePlayers.join(", ")}</span>
                         </div>
                       </div>
                     );
                   })}
+
+                  {hasMore && (
+                    <button
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      className="w-full py-2 text-sm text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors disabled:opacity-50"
+                    >
+                      {loadingMore ? "Loading..." : "Load more"}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
