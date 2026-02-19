@@ -14,6 +14,7 @@ import {
 import { db } from "../lib/firebase";
 import { useAuthStore } from "../stores/authStore";
 import type { Relationship, User } from "../types";
+import { PlayerProfilePopup } from "../components/PlayerProfilePopup";
 
 export function FriendsPage() {
   const { user } = useAuthStore();
@@ -23,6 +24,7 @@ export function FriendsPage() {
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [searching, setSearching] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedPlayerUid, setSelectedPlayerUid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -300,7 +302,10 @@ export function FriendsPage() {
                   key={rel.id}
                   className="flex items-center justify-between bg-gray-700 p-3 rounded-lg"
                 >
-                  <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setSelectedPlayerUid(friendUid)}
+                    className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
+                  >
                     <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
                       {friend?.username.charAt(0).toUpperCase() || "?"}
                     </div>
@@ -312,7 +317,7 @@ export function FriendsPage() {
                         Elo: {friend?.elo || "-"}
                       </div>
                     </div>
-                  </div>
+                  </button>
                   <div className="flex items-center gap-3">
                     <label
                       className="flex items-center gap-2 cursor-pointer"
@@ -345,6 +350,13 @@ export function FriendsPage() {
           </div>
         )}
       </div>
+
+      {selectedPlayerUid && (
+        <PlayerProfilePopup
+          playerUid={selectedPlayerUid}
+          onClose={() => setSelectedPlayerUid(null)}
+        />
+      )}
     </div>
   );
 }

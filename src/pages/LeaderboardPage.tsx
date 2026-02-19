@@ -3,10 +3,12 @@ import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import type { User } from "../types";
 import { useAuthStore } from "../stores/authStore";
+import { PlayerProfilePopup } from "../components/PlayerProfilePopup";
 
 export function LeaderboardPage() {
   const [players, setPlayers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedPlayerUid, setSelectedPlayerUid] = useState<string | null>(null);
   const { user: currentUser } = useAuthStore();
 
   useEffect(() => {
@@ -71,7 +73,8 @@ export function LeaderboardPage() {
               return (
                 <tr
                   key={player.uid}
-                  className={`${isCurrentUser ? "bg-blue-900/30" : ""}`}
+                  onClick={() => !isCurrentUser && setSelectedPlayerUid(player.uid)}
+                  className={`${isCurrentUser ? "bg-blue-900/30" : "hover:bg-gray-700/50 cursor-pointer"}`}
                 >
                   <td className="px-4 py-3">
                     <span
@@ -128,6 +131,13 @@ export function LeaderboardPage() {
           </div>
         )}
       </div>
+
+      {selectedPlayerUid && (
+        <PlayerProfilePopup
+          playerUid={selectedPlayerUid}
+          onClose={() => setSelectedPlayerUid(null)}
+        />
+      )}
     </div>
   );
 }
