@@ -40,6 +40,7 @@ export interface Match {
   blueTeam: Team;
   events: MatchEvent[];
   eloChanges?: Record<string, number>;
+  preMatchElos?: Record<string, number>;
   createdBy: string;
   createdAt?: Timestamp;
   startedAt?: Timestamp;

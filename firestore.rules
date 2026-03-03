@@ -46,6 +46,17 @@ service cloud.firestore {
           ||
           (request.resource.data.losses == resource.data.losses + 1 && request.resource.data.wins == resource.data.wins)
         );
+
+      // Allow ELO/wins/losses correction when a match result is edited (no matchesPlayed change)
+      allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['elo', 'wins', 'losses'])
+        && request.resource.data.matchesPlayed == resource.data.matchesPlayed
+        && request.resource.data.elo - resource.data.elo >= -200
+        && request.resource.data.elo - resource.data.elo <= 200
+        && request.resource.data.wins >= resource.data.wins - 1
+        && request.resource.data.wins <= resource.data.wins + 1
+        && request.resource.data.losses >= resource.data.losses - 1
+        && request.resource.data.losses <= resource.data.losses + 1;
     }
 
     // Relationships collection (friendships)
@@ -77,14 +88,25 @@ service cloud.firestore {
       allow create: if isAuthenticated()
         && request.auth.uid in request.resource.data.participants;
 
-      // Participants can update matches (add goals, change status, set eloChanges)
+      // Participants can update live/lobby matches (goals, swaps, status transitions)
       allow update: if isAuthenticated()
-        && request.auth.uid in resource.data.participants;
+        && request.auth.uid in resource.data.participants
+        && resource.data.status != 'completed';
 
-      // Only allow delete if match is still in lobby status
+      // Participants can edit a completed match within the 10-minute window
+      // request.time is Firebase server time — cannot be manipulated by the client
+      allow update: if isAuthenticated()
+        && request.auth.uid in resource.data.participants
+        && resource.data.status == 'completed'
+        && request.time.toMillis() <= resource.data.endedAt.toMillis() + 600000;
+
+      // Lobby can be deleted by any participant; live match only by creator
       allow delete: if isAuthenticated()
         && request.auth.uid in resource.data.participants
-        && resource.data.status == 'lobby';
+        && (
+          resource.data.status == 'lobby'
+          || (resource.data.status == 'live' && resource.data.createdBy == request.auth.uid)
+        );
     }
   }
 }

@@ -30,6 +30,7 @@ export function LiveMatchPage() {
     swapRoles,
     startTimer,
     completeMatch,
+    deleteMatch,
   } = useMatchStore();
 
   const [redScore, setRedScore] = useState("");
@@ -84,6 +85,13 @@ export function LiveMatchPage() {
 
   const handleSwap = (team: "red" | "blue") => {
     if (matchId) swapRoles(matchId, team);
+  };
+
+  const handleDelete = () => {
+    if (!matchId) return;
+    if (window.confirm("Delete this match? This cannot be undone.")) {
+      deleteMatch(matchId).then(() => navigate("/matches"));
+    }
   };
 
   const red = parseInt(redScore, 10);
@@ -153,6 +161,16 @@ export function LiveMatchPage() {
       >
         Submit Match
       </button>
+
+      {/* Delete match (creator only) */}
+      {currentMatch.createdBy === user.uid && (
+        <button
+          onClick={handleDelete}
+          className="w-full py-3 bg-red-900/50 hover:bg-red-800 rounded-lg text-sm font-medium text-red-300 transition-colors"
+        >
+          Delete Match
+        </button>
+      )}
 
       {/* Team info & swap */}
       <div className="grid grid-cols-2 gap-4">

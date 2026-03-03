@@ -42,6 +42,14 @@ interface MatchState {
   addGoal: (matchId: string, team: "red" | "blue") => Promise<void>;
   swapRoles: (matchId: string, team: "red" | "blue") => Promise<void>;
   completeMatch: (matchId: string, finalRedScore?: number, finalBlueScore?: number) => Promise<void>;
+  deleteMatch: (matchId: string) => Promise<void>;
+  editCompletedMatch: (
+    matchId: string,
+    newRedTeam: { attacker: string | null; defender: string | null },
+    newBlueTeam: { attacker: string | null; defender: string | null },
+    newRedScore: number,
+    newBlueScore: number
+  ) => Promise<void>;
 
   // Lobby viewer tracking
   joinLobby: (matchId: string, userUid: string) => Promise<void>;
@@ -211,16 +219,16 @@ export const useMatchStore = create<MatchState>((set, get) => {
       const redTeamWithScore = { ...match.redTeam, score: redScore };
       const blueTeamWithScore = { ...match.blueTeam, score: blueScore };
 
-      // Calculate Elo changes
-      const userElos: Record<string, number> = {};
+      // Snapshot pre-match ELOs and calculate changes
+      const preMatchElos: Record<string, number> = {};
       for (const [uid, user] of Object.entries(participants)) {
-        userElos[uid] = user.elo;
+        preMatchElos[uid] = user.elo;
       }
 
       const eloChanges = calculateMatchEloChanges(
         redTeamWithScore,
         blueTeamWithScore,
-        userElos
+        preMatchElos
       );
 
       // Update match
@@ -228,6 +236,7 @@ export const useMatchStore = create<MatchState>((set, get) => {
         status: "completed",
         endedAt: serverTimestamp(),
         eloChanges,
+        preMatchElos,
       });
 
       // Update each player's stats
@@ -246,6 +255,75 @@ export const useMatchStore = create<MatchState>((set, get) => {
           matchesPlayed: user.matchesPlayed + 1,
           wins: user.wins + (won ? 1 : 0),
           losses: user.losses + (won ? 0 : 1),
+        });
+      }
+    },
+
+    deleteMatch: async (matchId) => {
+      const matchRef = doc(db, "matches", matchId);
+      const matchSnap = await getDoc(matchRef);
+      if (!matchSnap.exists()) return;
+      const match = matchSnap.data() as Match;
+      if (match.status !== "live") return;
+      await deleteDoc(matchRef);
+    },
+
+    editCompletedMatch: async (matchId, newRedTeam, newBlueTeam, newRedScore, newBlueScore) => {
+      const matchSnap = await getDoc(doc(db, "matches", matchId));
+      if (!matchSnap.exists()) return;
+      const match = { id: matchSnap.id, ...matchSnap.data() } as Match;
+
+      const oldEloChanges = match.eloChanges ?? {};
+      const preMatchElos = match.preMatchElos ?? {};
+      const oldRedWon = match.redTeam.score > match.blueTeam.score;
+      const newRedWon = newRedScore > newBlueScore;
+
+      const newRedTeamWithScore = { ...newRedTeam, score: newRedScore };
+      const newBlueTeamWithScore = { ...newBlueTeam, score: newBlueScore };
+
+      const newEloChanges = calculateMatchEloChanges(
+        newRedTeamWithScore,
+        newBlueTeamWithScore,
+        preMatchElos
+      );
+
+      // Fetch current user data for all participants
+      const userDocs: Record<string, User> = {};
+      for (const uid of match.participants) {
+        const ud = await getDoc(doc(db, "users", uid));
+        if (ud.exists()) userDocs[uid] = { uid: ud.id, ...ud.data() } as User;
+      }
+
+      // Update match document
+      await updateDoc(doc(db, "matches", matchId), {
+        redTeam: newRedTeamWithScore,
+        blueTeam: newBlueTeamWithScore,
+        eloChanges: newEloChanges,
+      });
+
+      // Apply net ELO delta and update wins/losses if outcome changed
+      for (const uid of match.participants) {
+        const user = userDocs[uid];
+        if (!user) continue;
+
+        const oldChange = oldEloChanges[uid] ?? 0;
+        const newChange = newEloChanges[uid] ?? 0;
+        const netEloDelta = newChange - oldChange;
+
+        const wasOnOldRed =
+          match.redTeam.attacker === uid || match.redTeam.defender === uid;
+        const isOnNewRed =
+          newRedTeam.attacker === uid || newRedTeam.defender === uid;
+        const oldWon = wasOnOldRed ? oldRedWon : !oldRedWon;
+        const newWon = isOnNewRed ? newRedWon : !newRedWon;
+
+        const winsDelta = (newWon ? 1 : 0) - (oldWon ? 1 : 0);
+        const lossesDelta = (newWon ? 0 : 1) - (oldWon ? 0 : 1);
+
+        await updateDoc(doc(db, "users", uid), {
+          elo: user.elo + netEloDelta,
+          wins: user.wins + winsDelta,
+          losses: user.losses + lossesDelta,
         });
       }
     },

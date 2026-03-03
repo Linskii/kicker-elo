@@ -12,6 +12,7 @@ import { NewMatchPage } from "./pages/NewMatchPage";
 import { MatchLobbyPage } from "./pages/MatchLobbyPage";
 import { LiveMatchPage } from "./pages/LiveMatchPage";
 import { MatchResultPage } from "./pages/MatchResultPage";
+import { EditMatchPage } from "./pages/EditMatchPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuthStore();
@@ -157,6 +158,17 @@ function App() {
             <ProtectedRoute>
               <Layout>
                 <MatchResultPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/match/:matchId/edit"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <EditMatchPage />
               </Layout>
             </ProtectedRoute>
           }

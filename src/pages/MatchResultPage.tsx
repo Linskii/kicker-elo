@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
@@ -30,6 +30,10 @@ export function MatchResultPage() {
       </div>
     );
   }
+
+  const [now] = useState(() => Date.now());
+  const endedAtMs = currentMatch.endedAt?.toMillis() ?? 0;
+  const isEditable = endedAtMs > 0 && now - endedAtMs < 10 * 60 * 1000;
 
   const redWon = currentMatch.redTeam.score > currentMatch.blueTeam.score;
   const isUserRed =
@@ -134,13 +138,21 @@ export function MatchResultPage() {
       </div>
 
       {/* Actions */}
-      <div className="flex gap-4">
+      <div className="flex gap-3 flex-wrap">
         <Link
           to="/matches"
           className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-center font-medium"
         >
           Match History
         </Link>
+        {isEditable && (
+          <Link
+            to={`/match/${matchId}/edit`}
+            className="flex-1 py-3 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-center font-medium"
+          >
+            Edit Result
+          </Link>
+        )}
         <Link
           to="/match/new"
           className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-center font-medium"
