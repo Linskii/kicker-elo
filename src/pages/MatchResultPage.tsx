@@ -8,6 +8,7 @@ export function MatchResultPage() {
   const { user } = useAuthStore();
   const { currentMatch, participants, loading, subscribeToMatch } =
     useMatchStore();
+  const [now] = useState(() => Date.now());
 
   useEffect(() => {
     if (!matchId) return;
@@ -30,8 +31,6 @@ export function MatchResultPage() {
       </div>
     );
   }
-
-  const [now] = useState(() => Date.now());
   const endedAtMs = currentMatch.endedAt?.toMillis() ?? 0;
   const isEditable = endedAtMs > 0 && now - endedAtMs < 10 * 60 * 1000;
 

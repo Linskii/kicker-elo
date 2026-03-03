@@ -329,7 +329,11 @@ export const useMatchStore = create<MatchState>((set, get) => {
     },
 
     joinLobby: async (matchId, userUid) => {
-      await updateDoc(doc(db, "matches", matchId), {
+      const matchRef = doc(db, "matches", matchId);
+      const matchSnap = await getDoc(matchRef);
+      if (!matchSnap.exists()) return;
+      if (matchSnap.data().status !== "lobby") return;
+      await updateDoc(matchRef, {
         viewers: arrayUnion(userUid),
       });
     },
