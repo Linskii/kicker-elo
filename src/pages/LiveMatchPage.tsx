@@ -10,14 +10,11 @@ function formatTime(seconds: number): string {
 }
 
 function isValidScore(red: number, blue: number): boolean {
-  return (
-    !isNaN(red) &&
-    !isNaN(blue) &&
-    red >= 0 &&
-    blue >= 0 &&
-    Math.max(red, blue) >= 10 &&
-    Math.abs(red - blue) >= 2
-  );
+  if (isNaN(red) || isNaN(blue) || red < 0 || blue < 0) return false;
+  const max = Math.max(red, blue);
+  const diff = Math.abs(red - blue);
+  // Winner must reach 10; if they went beyond 10 the diff must be exactly 2
+  return max >= 10 && diff >= 2 && (max === 10 || diff === 2);
 }
 
 export function LiveMatchPage() {
