@@ -290,9 +290,15 @@ export const useMatchStore = create<MatchState>((set, get) => {
         preMatchElos
       );
 
-      // Fetch current user data for all participants
+      // Only update players who were on a team in the old or new match
+      const teamPlayerUids = new Set([
+        ...Object.keys(oldEloChanges),
+        ...Object.keys(newEloChanges),
+      ]);
+
+      // Fetch current user data for team players only
       const userDocs: Record<string, User> = {};
-      for (const uid of match.participants) {
+      for (const uid of teamPlayerUids) {
         const ud = await getDoc(doc(db, "users", uid));
         if (ud.exists()) userDocs[uid] = { uid: ud.id, ...ud.data() } as User;
       }
@@ -305,7 +311,7 @@ export const useMatchStore = create<MatchState>((set, get) => {
       });
 
       // Apply net ELO delta and update wins/losses if outcome changed
-      for (const uid of match.participants) {
+      for (const uid of teamPlayerUids) {
         const user = userDocs[uid];
         if (!user) continue;
 
