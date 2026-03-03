@@ -231,30 +231,33 @@ export const useMatchStore = create<MatchState>((set, get) => {
         preMatchElos
       );
 
-      // Update match
+      // Update match - include final scores so the result page displays them correctly
       await updateDoc(doc(db, "matches", matchId), {
         status: "completed",
         endedAt: serverTimestamp(),
         eloChanges,
         preMatchElos,
+        "redTeam.score": redScore,
+        "blueTeam.score": blueScore,
       });
 
-      // Update each player's stats
+      // Update each player's stats using fresh Firestore data to avoid stale-state permission errors
       const redWon = redScore > blueScore;
 
       for (const [uid, change] of Object.entries(eloChanges)) {
-        const user = participants[uid];
-        if (!user) continue;
+        const freshSnap = await getDoc(doc(db, "users", uid));
+        if (!freshSnap.exists()) continue;
+        const freshUser = { uid: freshSnap.id, ...freshSnap.data() } as User;
 
         const isRed =
           match.redTeam.attacker === uid || match.redTeam.defender === uid;
         const won = isRed ? redWon : !redWon;
 
         await updateDoc(doc(db, "users", uid), {
-          elo: user.elo + change,
-          matchesPlayed: user.matchesPlayed + 1,
-          wins: user.wins + (won ? 1 : 0),
-          losses: user.losses + (won ? 0 : 1),
+          elo: freshUser.elo + change,
+          matchesPlayed: freshUser.matchesPlayed + 1,
+          wins: freshUser.wins + (won ? 1 : 0),
+          losses: freshUser.losses + (won ? 0 : 1),
         });
       }
     },
