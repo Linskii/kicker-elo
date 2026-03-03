@@ -15,7 +15,6 @@ export interface Relationship {
   users: [string, string];
   status: "pending" | "accepted";
   senderId: string;
-  trusts: Record<string, boolean>;
   updatedAt: Timestamp;
 }
 
@@ -36,7 +35,6 @@ export interface Match {
   id: string;
   status: "lobby" | "live" | "completed";
   participants: string[];
-  pendingInvitations?: string[];
   viewers?: string[];
   redTeam: Team;
   blueTeam: Team;
@@ -48,12 +46,3 @@ export interface Match {
   endedAt?: Timestamp;
 }
 
-export interface Invitation {
-  id: string;
-  matchId: string;
-  inviterUid: string;
-  inviteeUid: string;
-  status: "pending" | "accepted" | "declined";
-  createdAt: Timestamp;
-  respondedAt?: Timestamp;
-}

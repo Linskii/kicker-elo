@@ -6,7 +6,6 @@ import {
   onSnapshot,
   doc,
   setDoc,
-  updateDoc,
   deleteDoc,
   getDocs,
   serverTimestamp,
@@ -95,7 +94,6 @@ export function FriendsPage() {
       users: ids,
       status: "pending",
       senderId: user.uid,
-      trusts: { [user.uid]: false, [friendUid]: false },
       updatedAt: serverTimestamp(),
     });
 
@@ -103,30 +101,12 @@ export function FriendsPage() {
     setSearchUsername("");
   };
 
-  const acceptRequest = async (relationshipId: string) => {
-    await updateDoc(doc(db, "relationships", relationshipId), {
-      status: "accepted",
-      updatedAt: serverTimestamp(),
-    });
-  };
-
   const removeFriend = async (relationshipId: string) => {
     await deleteDoc(doc(db, "relationships", relationshipId));
   };
 
-  const toggleTrust = async (relationshipId: string, currentTrust: boolean) => {
-    if (!user) return;
-    await updateDoc(doc(db, "relationships", relationshipId), {
-      [`trusts.${user.uid}`]: !currentTrust,
-      updatedAt: serverTimestamp(),
-    });
-  };
-
   if (!user) return null;
 
-  const pendingReceived = relationships.filter(
-    (r) => r.status === "pending" && r.senderId !== user.uid
-  );
   const pendingSent = relationships.filter(
     (r) => r.status === "pending" && r.senderId === user.uid
   );
@@ -200,53 +180,6 @@ export function FriendsPage() {
         )}
       </div>
 
-      {/* Pending Received */}
-      {pendingReceived.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h2 className="font-semibold mb-3">Friend Requests</h2>
-          <div className="space-y-2">
-            {pendingReceived.map((rel) => {
-              const friendUid = rel.users.find((uid) => uid !== user.uid)!;
-              const friend = users[friendUid];
-              return (
-                <div
-                  key={rel.id}
-                  className="flex items-center justify-between bg-gray-700 p-3 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                      {friend?.username.charAt(0).toUpperCase() || "?"}
-                    </div>
-                    <div>
-                      <div className="font-medium">
-                        {friend?.username || "Loading..."}
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        Elo: {friend?.elo || "-"}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => acceptRequest(rel.id)}
-                      className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => removeFriend(rel.id)}
-                      className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm"
-                    >
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* Pending Sent */}
       {pendingSent.length > 0 && (
         <div className="bg-gray-800 rounded-lg p-4">
@@ -295,7 +228,6 @@ export function FriendsPage() {
             {friends.map((rel) => {
               const friendUid = rel.users.find((uid) => uid !== user.uid)!;
               const friend = users[friendUid];
-              const isTrusted = rel.trusts[user.uid];
 
               return (
                 <div
@@ -318,32 +250,12 @@ export function FriendsPage() {
                       </div>
                     </div>
                   </button>
-                  <div className="flex items-center gap-3">
-                    <label
-                      className="flex items-center gap-2 cursor-pointer"
-                      title="Trust allows auto-join to match lobbies"
-                    >
-                      <span className="text-sm text-gray-400">
-                        {isTrusted ? "Trusted" : "Trust"}
-                      </span>
-                      <div className="relative">
-                        <input
-                          type="checkbox"
-                          checked={isTrusted}
-                          onChange={() => toggleTrust(rel.id, isTrusted)}
-                          className="sr-only peer"
-                        />
-                        <div className="w-11 h-6 bg-gray-600 rounded-full peer peer-checked:bg-green-600 transition-colors duration-300"></div>
-                        <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-300 peer-checked:translate-x-5"></div>
-                      </div>
-                    </label>
-                    <button
-                      onClick={() => removeFriend(rel.id)}
-                      className="px-3 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-sm"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => removeFriend(rel.id)}
+                    className="px-3 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-sm"
+                  >
+                    Remove
+                  </button>
                 </div>
               );
             })}

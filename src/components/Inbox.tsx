@@ -1,35 +1,60 @@
 import { useState, useEffect, useRef } from "react";
-import { useInvitationStore } from "../stores/invitationStore";
+import {
+  collection,
+  query,
+  where,
+  onSnapshot,
+  doc,
+  updateDoc,
+  deleteDoc,
+  getDoc,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "../lib/firebase";
 import { useAuthStore } from "../stores/authStore";
-import type { Invitation } from "../types";
+import type { Relationship, User } from "../types";
 
 export function Inbox() {
   const { user } = useAuthStore();
-  const {
-    pendingInvitations,
-    inviterUsers,
-    subscribeToInvitations,
-    acceptInvitation,
-    declineInvitation,
-  } = useInvitationStore();
-
+  const [pendingRequests, setPendingRequests] = useState<Relationship[]>([]);
+  const [senderUsers, setSenderUsers] = useState<Record<string, User>>({});
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Subscribe to invitations
   useEffect(() => {
     if (!user) return;
-    const unsubscribe = subscribeToInvitations(user.uid);
-    return () => unsubscribe();
-  }, [user, subscribeToInvitations]);
 
-  // Close dropdown when clicking outside
+    const q = query(
+      collection(db, "relationships"),
+      where("users", "array-contains", user.uid),
+      where("status", "==", "pending")
+    );
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const rels = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }) as Relationship)
+        .filter((r) => r.senderId !== user.uid);
+
+      setPendingRequests(rels);
+
+      // Fetch sender user data
+      const newSenderUsers: Record<string, User> = {};
+      for (const rel of rels) {
+        const senderUid = rel.senderId;
+        const userDoc = await getDoc(doc(db, "users", senderUid));
+        if (userDoc.exists()) {
+          newSenderUsers[senderUid] = { uid: userDoc.id, ...userDoc.data() } as User;
+        }
+      }
+      setSenderUsers(newSenderUsers);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     }
@@ -37,16 +62,18 @@ export function Inbox() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleAccept = async (invitation: Invitation) => {
-    await acceptInvitation(invitation);
-    setIsOpen(false);
+  const acceptRequest = async (rel: Relationship) => {
+    await updateDoc(doc(db, "relationships", rel.id), {
+      status: "accepted",
+      updatedAt: serverTimestamp(),
+    });
   };
 
-  const handleDecline = async (invitation: Invitation) => {
-    await declineInvitation(invitation);
+  const declineRequest = async (rel: Relationship) => {
+    await deleteDoc(doc(db, "relationships", rel.id));
   };
 
-  const count = pendingInvitations.length;
+  const count = pendingRequests.length;
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -55,12 +82,7 @@ export function Inbox() {
         className="relative p-2 text-gray-400 hover:text-white transition-colors"
         aria-label="Inbox"
       >
-        <svg
-          className="w-6 h-6"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -79,44 +101,41 @@ export function Inbox() {
       {isOpen && (
         <div className="absolute right-0 top-full mt-2 w-80 bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50">
           <div className="p-3 border-b border-gray-700">
-            <h3 className="font-semibold">Match Invitations</h3>
+            <h3 className="font-semibold">Friend Requests</h3>
           </div>
 
           {count === 0 ? (
             <div className="p-4 text-center text-gray-400">
-              No pending invitations
+              No pending friend requests
             </div>
           ) : (
             <div className="max-h-80 overflow-y-auto">
-              {pendingInvitations.map((invitation) => {
-                const inviter = inviterUsers[invitation.inviterUid];
+              {pendingRequests.map((rel) => {
+                const sender = senderUsers[rel.senderId];
                 return (
-                  <div
-                    key={invitation.id}
-                    className="p-3 border-b border-gray-700 last:border-b-0"
-                  >
+                  <div key={rel.id} className="p-3 border-b border-gray-700 last:border-b-0">
                     <div className="flex items-center gap-3">
                       <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                        {inviter?.username.charAt(0).toUpperCase() || "?"}
+                        {sender?.username.charAt(0).toUpperCase() || "?"}
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">
-                          {inviter?.username || "Someone"} invited you
+                          {sender?.username || "Someone"}
                         </div>
                         <div className="text-sm text-gray-400">
-                          Match invitation
+                          wants to be friends · Elo: {sender?.elo ?? "-"}
                         </div>
                       </div>
                     </div>
                     <div className="flex gap-2 mt-3">
                       <button
-                        onClick={() => handleAccept(invitation)}
+                        onClick={() => acceptRequest(rel)}
                         className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 rounded text-sm font-medium transition-colors"
                       >
                         Accept
                       </button>
                       <button
-                        onClick={() => handleDecline(invitation)}
+                        onClick={() => declineRequest(rel)}
                         className="flex-1 py-1.5 bg-gray-600 hover:bg-gray-500 rounded text-sm font-medium transition-colors"
                       >
                         Decline
