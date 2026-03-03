@@ -1,73 +1,98 @@
-# React + TypeScript + Vite
+# Kicker ELO
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A web app for tracking foosball (kicker) match results and player ratings using the ELO rating system. Players can create matches, track live scores, manage friends, and compete on a global leaderboard.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **ELO Rating System** — Ratings update automatically after each match using the standard ELO formula (K=32)
+- **Match Modes** — Supports 1v1, 1v2, and 2v2 configurations with attacker/defender roles
+- **Live Scoring** — Real-time goal tracking with a first-to-10 (by 2) win condition and match timer
+- **Drag-and-Drop Team Assignment** — Assign players to red/blue teams and swap roles in the lobby
+- **Leaderboard** — Top 50 players ranked by ELO with win/loss records
+- **Player Profiles** — Per-player stats and paginated match history
+- **Friends System** — Search players by username, send/accept friend requests, and view friends' ratings
+- **Notifications** — In-app inbox for pending friend requests
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Layer | Technology |
+|---|---|
+| Frontend | React 19, TypeScript, Tailwind CSS |
+| Routing | React Router 7 |
+| State | Zustand |
+| Drag & Drop | @dnd-kit |
+| Backend | Firebase (Auth + Firestore) |
+| Build | Vite |
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Prerequisites
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Node.js 18+
+- A Firebase project with Firestore and Authentication enabled
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Installation
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Configuration
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Create a `.env` file in the project root with your Firebase config:
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```env
+VITE_FIREBASE_API_KEY=...
+VITE_FIREBASE_AUTH_DOMAIN=...
+VITE_FIREBASE_PROJECT_ID=...
+VITE_FIREBASE_STORAGE_BUCKET=...
+VITE_FIREBASE_MESSAGING_SENDER_ID=...
+VITE_FIREBASE_APP_ID=...
 ```
+
+### Development
+
+```bash
+npm run dev
+```
+
+### Build
+
+```bash
+npm run build
+```
+
+### Preview production build
+
+```bash
+npm run preview
+```
+
+## Project Structure
+
+```
+src/
+├── pages/          # Route-level page components
+├── components/     # Reusable UI components
+├── stores/         # Zustand stores (auth, match)
+├── types/          # TypeScript interfaces
+├── utils/          # ELO calculation logic
+└── lib/            # Firebase initialization
+```
+
+## Match Flow
+
+1. **Create** — A player opens a new match lobby
+2. **Lobby** — Players are dragged into team slots (red/blue, attacker/defender)
+3. **Live** — Match starts; goals are recorded in real time
+4. **Result** — First team to 10 goals with a 2-goal lead wins; ELO ratings update automatically
+
+## ELO Formula
+
+```
+Expected = 1 / (1 + 10 ^ ((opponent_elo - player_elo) / 400))
+New ELO  = Old ELO + 32 × (result - expected)
+```
+
+Team ELO is the average of the two players' ratings. Individual ELO changes are bounded to ±50 per match.
+
