@@ -9,6 +9,7 @@ import {
   deleteDoc,
   getDocs,
   serverTimestamp,
+  limit,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useAuthStore } from "../stores/authStore";
@@ -67,21 +68,31 @@ export function FriendsPage() {
     return () => unsubscribe();
   }, [user]);
 
-  const handleSearch = async () => {
-    if (!searchUsername.trim() || !user) return;
+  useEffect(() => {
+    if (!searchUsername.trim() || !user) {
+      setSearchResults([]);
+      return;
+    }
 
     setSearching(true);
-    const q = query(
-      collection(db, "users"),
-      where("username", "==", searchUsername.trim())
-    );
-    const snapshot = await getDocs(q);
-    const results = snapshot.docs
-      .map((doc) => ({ uid: doc.id, ...doc.data() }) as User)
-      .filter((u) => u.uid !== user.uid);
-    setSearchResults(results);
-    setSearching(false);
-  };
+    const term = searchUsername.trim().toLowerCase();
+    const timer = setTimeout(async () => {
+      const q = query(
+        collection(db, "users"),
+        where("username", ">=", term),
+        where("username", "<=", term + "\uf8ff"),
+        limit(10)
+      );
+      const snapshot = await getDocs(q);
+      const results = snapshot.docs
+        .map((doc) => ({ uid: doc.id, ...doc.data() }) as User)
+        .filter((u) => u.uid !== user.uid);
+      setSearchResults(results);
+      setSearching(false);
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [searchUsername, user]);
 
   const sendFriendRequest = async (friendUid: string) => {
     if (!user) return;
@@ -96,9 +107,6 @@ export function FriendsPage() {
       senderId: user.uid,
       updatedAt: serverTimestamp(),
     });
-
-    setSearchResults([]);
-    setSearchUsername("");
   };
 
   const removeFriend = async (relationshipId: string) => {
@@ -119,22 +127,19 @@ export function FriendsPage() {
       {/* Search */}
       <div className="bg-gray-800 rounded-lg p-4">
         <h2 className="font-semibold mb-3">Add Friend</h2>
-        <div className="flex gap-2">
+        <div className="relative">
           <input
             type="text"
             value={searchUsername}
             onChange={(e) => setSearchUsername(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
             placeholder="Search by username..."
-            className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
           />
-          <button
-            onClick={handleSearch}
-            disabled={searching}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
-          >
-            {searching ? "..." : "Search"}
-          </button>
+          {searching && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
+              ...
+            </div>
+          )}
         </div>
 
         {searchResults.length > 0 && (

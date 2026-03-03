@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
-import { collection, query, orderBy, limit, getDocs } from "firebase/firestore";
+import {
+  collection,
+  query,
+  orderBy,
+  limit,
+  getDocs,
+  where,
+  setDoc,
+  doc,
+  serverTimestamp,
+} from "firebase/firestore";
 import { db } from "../lib/firebase";
-import type { User } from "../types";
+import type { User, Relationship } from "../types";
 import { useAuthStore } from "../stores/authStore";
 import { PlayerProfilePopup } from "../components/PlayerProfilePopup";
 
@@ -9,6 +19,7 @@ export function LeaderboardPage() {
   const [players, setPlayers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPlayerUid, setSelectedPlayerUid] = useState<string | null>(null);
+  const [relationships, setRelationships] = useState<Relationship[]>([]);
   const { user: currentUser } = useAuthStore();
 
   useEffect(() => {
@@ -28,6 +39,43 @@ export function LeaderboardPage() {
 
     fetchLeaderboard();
   }, []);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const fetchRelationships = async () => {
+      const q = query(
+        collection(db, "relationships"),
+        where("users", "array-contains", currentUser.uid)
+      );
+      const snapshot = await getDocs(q);
+      setRelationships(
+        snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as Relationship)
+      );
+    };
+    fetchRelationships();
+  }, [currentUser]);
+
+  const sendFriendRequest = async (friendUid: string) => {
+    if (!currentUser) return;
+    const ids = [currentUser.uid, friendUid].sort();
+    const relationshipId = `${ids[0]}_${ids[1]}`;
+    await setDoc(doc(db, "relationships", relationshipId), {
+      users: ids,
+      status: "pending",
+      senderId: currentUser.uid,
+      updatedAt: serverTimestamp(),
+    });
+    setRelationships((prev) => [
+      ...prev,
+      {
+        id: relationshipId,
+        users: ids as [string, string],
+        status: "pending",
+        senderId: currentUser.uid,
+        updatedAt: null as never,
+      },
+    ]);
+  };
 
   if (loading) {
     return (
@@ -60,6 +108,9 @@ export function LeaderboardPage() {
               <th className="px-4 py-3 text-right text-sm font-medium text-gray-300 hidden sm:table-cell">
                 Win Rate
               </th>
+              {currentUser && (
+                <th className="px-4 py-3 text-right text-sm font-medium text-gray-300"></th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-700">
@@ -119,6 +170,31 @@ export function LeaderboardPage() {
                   <td className="px-4 py-3 text-right hidden sm:table-cell">
                     <span className="text-gray-300">{winRate}%</span>
                   </td>
+                  {currentUser && !isCurrentUser && (() => {
+                    const rel = relationships.find((r) =>
+                      r.users.includes(player.uid)
+                    );
+                    return (
+                      <td className="px-4 py-3 text-right">
+                        {rel ? (
+                          <span className="text-xs text-gray-500">
+                            {rel.status === "pending" ? "Pending" : "Friends"}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              sendFriendRequest(player.uid);
+                            }}
+                            className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs whitespace-nowrap"
+                          >
+                            + Add
+                          </button>
+                        )}
+                      </td>
+                    );
+                  })()}
+                  {currentUser && isCurrentUser && <td />}
                 </tr>
               );
             })}
