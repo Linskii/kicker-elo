@@ -18,14 +18,14 @@ function PlayerCircle({
 }) {
   return (
     <g>
-      <circle cx={cx} cy={cy} r={18} fill={color} />
+      <circle cx={cx} cy={cy} r={27} fill={color} />
       <text
         x={cx}
         y={cy}
         textAnchor="middle"
         dominantBaseline="central"
         fill="white"
-        fontSize={12}
+        fontSize={14}
         fontWeight="bold"
         fontFamily="sans-serif"
       >
@@ -66,21 +66,21 @@ export function FieldView({ redTeam, blueTeam }: FieldViewProps) {
       {/* Center circle */}
       <circle cx={280} cy={140} r={52} fill="none" stroke={stroke} strokeWidth={sw} />
 
-      {/* Red Defender (near left/red goal) */}
+      {/* Red Defender (near left/red goal, grows toward center) */}
       {redTeam.defender && (
-        <PlayerCircle cx={65} cy={cy} color="#ef4444" label={initials(redTeam.defender.username)} />
+        <PlayerCircle cx={74} cy={cy} color="#ef4444" label={initials(redTeam.defender.username)} />
       )}
-      {/* Red Attacker */}
-      {redTeam.attacker && (
-        <PlayerCircle cx={185} cy={cy} color="#ef4444" label={initials(redTeam.attacker.username)} />
-      )}
-      {/* Blue Attacker */}
+      {/* Blue Attacker (attacking left/red goal, grows toward it) */}
       {blueTeam.attacker && (
-        <PlayerCircle cx={375} cy={cy} color="#3b82f6" label={initials(blueTeam.attacker.username)} />
+        <PlayerCircle cx={176} cy={cy} color="#3b82f6" label={initials(blueTeam.attacker.username)} />
       )}
-      {/* Blue Defender (near right/blue goal) */}
+      {/* Red Attacker (attacking right/blue goal, grows toward it) */}
+      {redTeam.attacker && (
+        <PlayerCircle cx={384} cy={cy} color="#ef4444" label={initials(redTeam.attacker.username)} />
+      )}
+      {/* Blue Defender (near right/blue goal, grows toward center) */}
       {blueTeam.defender && (
-        <PlayerCircle cx={495} cy={cy} color="#3b82f6" label={initials(blueTeam.defender.username)} />
+        <PlayerCircle cx={486} cy={cy} color="#3b82f6" label={initials(blueTeam.defender.username)} />
       )}
     </svg>
   );
