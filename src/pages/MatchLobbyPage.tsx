@@ -143,13 +143,17 @@ export function MatchLobbyPage() {
 
   useEffect(() => {
     if (!matchId || loading) return;
-    if (currentMatch?.status === "live") {
-      navigate(`/match/${matchId}/live`);
-    } else if (currentMatch?.status === "completed") {
-      navigate(`/match/${matchId}/result`);
-    } else if (!currentMatch) {
+    if (currentMatch === null) {
       // Match was deleted (last viewer left)
       navigate("/matches");
+      return;
+    }
+    // Ignore stale data from a previous subscription (e.g. coming from result page)
+    if (currentMatch.id !== matchId) return;
+    if (currentMatch.status === "live") {
+      navigate(`/match/${matchId}/live`);
+    } else if (currentMatch.status === "completed") {
+      navigate(`/match/${matchId}/result`);
     }
   }, [currentMatch, loading, matchId, navigate]);
 
