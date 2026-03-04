@@ -8,6 +8,7 @@ export interface User {
   wins: number;
   losses: number;
   createdAt: Timestamp;
+  isAdmin?: boolean;
 }
 
 export interface Relationship {

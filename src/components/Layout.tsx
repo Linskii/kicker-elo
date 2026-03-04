@@ -16,6 +16,7 @@ export function Layout({ children }: LayoutProps) {
     { path: "/friends", label: "Friends" },
     { path: "/matches", label: "Matches" },
     { path: "/seasons", label: "Seasons" },
+    ...(user?.isAdmin ? [{ path: "/admin", label: "Admin" }] : []),
   ];
 
   return (

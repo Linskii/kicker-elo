@@ -5,6 +5,8 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
+  deleteDoc,
   query,
   orderBy,
   limit,
@@ -120,6 +122,69 @@ export async function checkAndTransitionSeason(): Promise<string> {
   }
 
   return todayYearMonth;
+}
+
+// --- Admin-only actions ---
+
+export async function adminCloseSeason(): Promise<void> {
+  const configRef = doc(db, "config", "seasons");
+  const configSnap = await getDoc(configRef);
+
+  const todayYearMonth = getYearMonth(new Date());
+  const currentSeasonId = configSnap.exists()
+    ? (configSnap.data().currentSeasonId as string)
+    : todayYearMonth;
+
+  const leaderboardSnapshot = await buildLeaderboardSnapshot();
+  const [year, month] = currentSeasonId.split("-").map(Number);
+  const label = makeLabel(currentSeasonId);
+
+  await setDoc(doc(db, "seasons", currentSeasonId), {
+    id: currentSeasonId,
+    label,
+    year,
+    month,
+    status: "completed",
+    endedAt: serverTimestamp(),
+    leaderboard: leaderboardSnapshot,
+  });
+
+  await updateDoc(configRef, { currentSeasonId: todayYearMonth });
+  await resetAllUserElos();
+}
+
+export async function adminBootstrapPastSeason(yearMonth: string): Promise<void> {
+  if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
+    throw new Error("Invalid format. Use YYYY-MM.");
+  }
+
+  const seasonRef = doc(db, "seasons", yearMonth);
+  const existing = await getDoc(seasonRef);
+  if (existing.exists()) {
+    throw new Error(`Season ${yearMonth} already exists.`);
+  }
+
+  const leaderboardSnapshot = await buildLeaderboardSnapshot();
+  const [year, month] = yearMonth.split("-").map(Number);
+  const label = makeLabel(yearMonth);
+
+  await setDoc(seasonRef, {
+    id: yearMonth,
+    label,
+    year,
+    month,
+    status: "completed",
+    endedAt: serverTimestamp(),
+    leaderboard: leaderboardSnapshot,
+  });
+}
+
+export async function adminDeleteSeason(seasonId: string): Promise<void> {
+  await deleteDoc(doc(db, "seasons", seasonId));
+}
+
+export async function adminUpdateSeasonLabel(seasonId: string, label: string): Promise<void> {
+  await updateDoc(doc(db, "seasons", seasonId), { label });
 }
 
 // --- Zustand store for reading seasons in the UI ---

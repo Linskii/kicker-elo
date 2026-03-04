@@ -13,6 +13,12 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // Helper to check if the requesting user is an admin
+    function isAdmin() {
+      return isAuthenticated()
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
     // Helper to validate Elo change is within reasonable bounds (-50 to +50)
     function isValidEloChange(oldElo, newElo) {
       let diff = newElo - oldElo;
@@ -31,9 +37,9 @@ service cloud.firestore {
         && request.resource.data.wins == 0
         && request.resource.data.losses == 0;
 
-      // Users can update their own profile (non-stat fields only)
+      // Users can update their own profile (non-stat fields only, isAdmin is also protected)
       allow update: if isOwner(userId)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['elo', 'matchesPlayed', 'wins', 'losses']);
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['elo', 'matchesPlayed', 'wins', 'losses', 'isAdmin']);
 
       // Allow stat updates from any match participant when a match completes
       // This allows the match creator to update all participants' stats
@@ -95,7 +101,10 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isAuthenticated()
         && seasonId.matches('^[0-9]{4}-[0-9]{2}$');
-      allow update, delete: if false;
+      // Only admins can update (label edits) or delete seasons
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['label']);
+      allow delete: if isAdmin();
     }
 
     // Matches collection
