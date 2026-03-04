@@ -1,15 +1,29 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
 import { FieldView } from "../components/FieldView";
 
 export function MatchResultPage() {
   const { matchId } = useParams<{ matchId: string }>();
+  const navigate = useNavigate();
   const { user } = useAuthStore();
-  const { currentMatch, participants, loading, subscribeToMatch } =
+  const { currentMatch, participants, loading, subscribeToMatch, createRematch } =
     useMatchStore();
   const [now] = useState(() => Date.now());
+  const [rematching, setRematching] = useState(false);
+
+  const handleRematch = async () => {
+    if (!user) return;
+    setRematching(true);
+    try {
+      const newMatchId = await createRematch(user.uid);
+      navigate(`/match/${newMatchId}`);
+    } catch (error) {
+      console.error("Error creating rematch:", error);
+      setRematching(false);
+    }
+  };
 
   useEffect(() => {
     if (!matchId) return;
@@ -165,6 +179,13 @@ export function MatchResultPage() {
             Edit Result
           </Link>
         )}
+        <button
+          onClick={handleRematch}
+          disabled={rematching}
+          className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-800 rounded-lg font-medium"
+        >
+          {rematching ? "Creating..." : "Rematch"}
+        </button>
         <Link
           to="/match/new"
           className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-center font-medium"

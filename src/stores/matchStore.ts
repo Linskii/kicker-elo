@@ -51,6 +51,8 @@ interface MatchState {
     newBlueScore: number
   ) => Promise<void>;
 
+  createRematch: (creatorUid: string) => Promise<string>;
+
   // Lobby viewer tracking
   joinLobby: (matchId: string, userUid: string) => Promise<void>;
   leaveLobby: (matchId: string, userUid: string) => Promise<void>;
@@ -370,6 +372,23 @@ export const useMatchStore = create<MatchState>((set, get) => {
           viewers: arrayRemove(userUid),
         });
       }
+    },
+
+    createRematch: async (creatorUid) => {
+      const match = get().currentMatch;
+      if (!match) throw new Error("No current match");
+
+      const matchRef = doc(collection(db, "matches"));
+      await setDoc(matchRef, {
+        status: "lobby" as const,
+        participants: match.participants,
+        redTeam: { attacker: match.redTeam.attacker, defender: match.redTeam.defender, score: 0 },
+        blueTeam: { attacker: match.blueTeam.attacker, defender: match.blueTeam.defender, score: 0 },
+        events: [],
+        createdBy: creatorUid,
+        createdAt: serverTimestamp(),
+      });
+      return matchRef.id;
     },
 
     deleteLobby: async (matchId) => {
