@@ -6,6 +6,9 @@ import {
   where,
   orderBy,
   getDocs,
+  limit,
+  startAfter,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
 import { useSeasonStore } from "../stores/seasonStore";
@@ -21,6 +24,9 @@ export function SeasonDetailPage() {
   const [activeTab, setActiveTab] = useState<Tab>("leaderboard");
   const [loading, setLoading] = useState(true);
   const [matchesLoading, setMatchesLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(false);
 
   useEffect(() => {
     if (!seasonId) return;
@@ -39,13 +45,34 @@ export function SeasonDetailPage() {
       collection(db, "matches"),
       where("seasonId", "==", seasonId),
       where("status", "==", "completed"),
-      orderBy("endedAt", "desc")
+      orderBy("endedAt", "desc"),
+      limit(10)
     );
     getDocs(q).then((snap) => {
       setMatches(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Match));
+      setLastDoc(snap.docs[snap.docs.length - 1] ?? null);
+      setHasMore(snap.docs.length === 10);
       setMatchesLoading(false);
     });
   }, [activeTab, seasonId, matches.length]);
+
+  const loadMore = async () => {
+    if (!lastDoc || loadingMore || !hasMore || !seasonId) return;
+    setLoadingMore(true);
+    const q = query(
+      collection(db, "matches"),
+      where("seasonId", "==", seasonId),
+      where("status", "==", "completed"),
+      orderBy("endedAt", "desc"),
+      startAfter(lastDoc),
+      limit(10)
+    );
+    const snap = await getDocs(q);
+    setMatches((prev) => [...prev, ...snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Match)]);
+    setLastDoc(snap.docs[snap.docs.length - 1] ?? null);
+    setHasMore(snap.docs.length === 10);
+    setLoadingMore(false);
+  };
 
   if (loading) {
     return (
@@ -193,6 +220,15 @@ export function SeasonDetailPage() {
                   </div>
                 </Link>
               ))}
+              {hasMore && (
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="w-full py-3 text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {loadingMore ? "Loading..." : "Load more matches"}
+                </button>
+              )}
             </div>
           )}
         </div>
