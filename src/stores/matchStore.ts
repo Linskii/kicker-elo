@@ -42,7 +42,6 @@ interface MatchState {
   removePlayer: (matchId: string, playerUid: string) => Promise<void>;
   assignToTeam: (matchId: string, playerUid: string, slot: TeamSlot) => Promise<void>;
   startMatch: (matchId: string) => Promise<void>;
-  addGoal: (matchId: string, side: 'red' | 'blue') => Promise<boolean>;
   completeMatch: (matchId: string, redScore: number, blueScore: number) => Promise<void>;
   editCompletedMatch: (
     matchId: string,
@@ -199,28 +198,6 @@ export const useMatchStore = create<MatchState>((set, _get) => ({
       status: 'live',
       startedAt: serverTimestamp(),
     });
-  },
-
-  addGoal: async (matchId, side) => {
-    const matchRef = doc(db, 'matches', matchId);
-    const snap = await getDoc(matchRef);
-    if (!snap.exists()) return false;
-    const match = snap.data() as Match;
-
-    const newRed = side === 'red' ? match.redScore + 1 : match.redScore;
-    const newBlue = side === 'blue' ? match.blueScore + 1 : match.blueScore;
-
-    await updateDoc(matchRef, {
-      redScore: newRed,
-      blueScore: newBlue,
-    });
-
-    const maxScore = Math.max(newRed, newBlue);
-    const diff = Math.abs(newRed - newBlue);
-    if (maxScore >= 10 && diff >= 2) {
-      return true;
-    }
-    return false;
   },
 
   completeMatch: async (matchId, redScore, blueScore) => {

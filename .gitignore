@@ -16,6 +16,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Preprompt (local context file, not project source)
+PREPROMPT.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

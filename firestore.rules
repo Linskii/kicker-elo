@@ -19,7 +19,7 @@ service cloud.firestore {
         && request.resource.data.losses == 0
         && request.resource.data.careerWins == 0
         && request.resource.data.careerLosses == 0;
-      allow update: if isUser(uid)
+      allow update: if isAuth()
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['attackElo'])
             || math.abs(request.resource.data.attackElo - resource.data.attackElo) <= 50)
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['defenseElo'])
@@ -30,7 +30,7 @@ service cloud.firestore {
 
       match /seasonStats/{seasonId} {
         allow read: if isAuth();
-        allow write: if isUser(uid) || isAdmin();
+        allow write: if isAuth();
       }
     }
 

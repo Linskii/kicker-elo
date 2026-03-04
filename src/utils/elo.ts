@@ -88,6 +88,14 @@ export function checkWinCondition(redScore: number, blueScore: number): boolean 
   return false;
 }
 
+export function isValidFinalScore(redScore: number, blueScore: number): boolean {
+  const high = Math.max(redScore, blueScore);
+  const low = Math.min(redScore, blueScore);
+  if (high < 10) return false;
+  if (high === 10) return low <= 8;
+  return high - low === 2;
+}
+
 export function formatSeasonId(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
