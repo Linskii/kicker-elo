@@ -20,7 +20,25 @@ export function NewMatchPage() {
 
   const [friends, setFriends] = useState<User[]>([]);
   const [matchId, setMatchId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(true);
+
+  // Auto-create match on mount
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    const init = async () => {
+      try {
+        const newMatchId = await createMatch(user.uid);
+        if (!cancelled) setMatchId(newMatchId);
+      } catch (error) {
+        console.error("Error creating match:", error);
+      } finally {
+        if (!cancelled) setCreating(false);
+      }
+    };
+    init();
+    return () => { cancelled = true; };
+  }, [user, createMatch]);
 
   // Fetch friends
   useEffect(() => {
@@ -68,19 +86,6 @@ export function NewMatchPage() {
     return () => unsubscribe();
   }, [matchId, subscribeToMatch]);
 
-  const handleCreateMatch = async () => {
-    if (!user) return;
-    setCreating(true);
-    try {
-      const newMatchId = await createMatch(user.uid);
-      setMatchId(newMatchId);
-    } catch (error) {
-      console.error("Error creating match:", error);
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const handleInvite = async (friendUid: string) => {
     if (!matchId || !user) return;
     await invitePlayer(matchId, friendUid);
@@ -100,23 +105,12 @@ export function NewMatchPage() {
 
   if (!user) return null;
 
-  // Before match is created
-  if (!matchId) {
+  if (creating || !matchId) {
     return (
       <div className="max-w-md mx-auto space-y-6">
         <h1 className="text-2xl font-bold">New Match</h1>
-
-        <div className="bg-gray-800 rounded-lg p-6 text-center">
-          <p className="text-gray-400 mb-6">
-            Create a match lobby and invite your friends to play.
-          </p>
-          <button
-            onClick={handleCreateMatch}
-            disabled={creating}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 rounded-lg font-medium"
-          >
-            {creating ? "Creating..." : "Create Match Lobby"}
-          </button>
+        <div className="bg-gray-800 rounded-lg p-6 text-center text-gray-400">
+          Creating lobby...
         </div>
       </div>
     );
