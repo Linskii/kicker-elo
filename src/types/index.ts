@@ -45,5 +45,25 @@ export interface Match {
   createdAt?: Timestamp;
   startedAt?: Timestamp;
   endedAt?: Timestamp;
+  seasonId?: string;
+}
+
+export interface SeasonPlayer {
+  uid: string;
+  username: string;
+  elo: number;
+  wins: number;
+  losses: number;
+  matchesPlayed: number;
+}
+
+export interface Season {
+  id: string;
+  label: string;
+  year: number;
+  month: number;
+  status: "completed";
+  endedAt: Timestamp;
+  leaderboard: SeasonPlayer[];
 }
 

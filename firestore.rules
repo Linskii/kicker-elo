@@ -57,6 +57,11 @@ service cloud.firestore {
         && request.resource.data.wins <= resource.data.wins + 1
         && request.resource.data.losses >= resource.data.losses - 1
         && request.resource.data.losses <= resource.data.losses + 1;
+
+      // Allow ELO reset to 1000 at season start (only elo changes, no other fields)
+      allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['elo'])
+        && request.resource.data.elo == 1000;
     }
 
     // Relationships collection (friendships)
@@ -77,6 +82,20 @@ service cloud.firestore {
       // Either user can delete the relationship
       allow delete: if isAuthenticated()
         && request.auth.uid in resource.data.users;
+    }
+
+    // Config collection (season tracking)
+    match /config/{document} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && document == "seasons";
+    }
+
+    // Seasons collection (historical season snapshots)
+    match /seasons/{seasonId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated()
+        && seasonId.matches('^[0-9]{4}-[0-9]{2}$');
+      allow update, delete: if false;
     }
 
     // Matches collection

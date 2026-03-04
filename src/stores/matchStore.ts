@@ -14,6 +14,7 @@ import {
 import { db } from "../lib/firebase";
 import type { Match, User } from "../types";
 import { calculateMatchEloChanges } from "../utils/elo";
+import { checkAndTransitionSeason } from "./seasonStore";
 
 interface MatchState {
   currentMatch: Match | null;
@@ -213,6 +214,9 @@ export const useMatchStore = create<MatchState>((set, get) => {
 
       get().stopTimer();
 
+      // Check for season transition first (may reset all user ELOs to 1000)
+      const seasonId = await checkAndTransitionSeason();
+
       // Use provided final scores or fall back to match state
       const redScore = finalRedScore ?? match.redTeam.score;
       const blueScore = finalBlueScore ?? match.blueTeam.score;
@@ -221,10 +225,12 @@ export const useMatchStore = create<MatchState>((set, get) => {
       const redTeamWithScore = { ...match.redTeam, score: redScore };
       const blueTeamWithScore = { ...match.blueTeam, score: blueScore };
 
-      // Snapshot pre-match ELOs and calculate changes
+      // Fetch fresh ELOs post-season-reset so first match of a new season
+      // correctly uses 1000 as the baseline for all players
       const preMatchElos: Record<string, number> = {};
-      for (const [uid, user] of Object.entries(participants)) {
-        preMatchElos[uid] = user.elo;
+      for (const uid of Object.keys(participants)) {
+        const freshDoc = await getDoc(doc(db, "users", uid));
+        if (freshDoc.exists()) preMatchElos[uid] = (freshDoc.data() as User).elo;
       }
 
       const eloChanges = calculateMatchEloChanges(
@@ -241,6 +247,7 @@ export const useMatchStore = create<MatchState>((set, get) => {
         preMatchElos,
         "redTeam.score": redScore,
         "blueTeam.score": blueScore,
+        seasonId,
       });
 
       // Update each player's stats using fresh Firestore data to avoid stale-state permission errors

@@ -15,6 +15,7 @@ export function Layout({ children }: LayoutProps) {
     { path: "/leaderboard", label: "Leaderboard" },
     { path: "/friends", label: "Friends" },
     { path: "/matches", label: "Matches" },
+    { path: "/seasons", label: "Seasons" },
   ];
 
   return (
@@ -34,7 +35,9 @@ export function Layout({ children }: LayoutProps) {
                       key={item.path}
                       to={item.path}
                       className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                        location.pathname === item.path
+                        item.path === "/"
+                          ? location.pathname === "/"
+                          : location.pathname.startsWith(item.path)
                           ? "bg-gray-700 text-white"
                           : "text-gray-300 hover:bg-gray-700 hover:text-white"
                       }`}
