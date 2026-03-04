@@ -8,6 +8,7 @@ import {
   getDocs,
   limit,
   startAfter,
+  Timestamp,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
@@ -39,12 +40,13 @@ export function SeasonDetailPage() {
 
   // Fetch matches lazily when the Matches tab is first opened
   useEffect(() => {
-    if (activeTab !== "matches" || !seasonId || matches.length > 0) return;
+    if (activeTab !== "matches" || !season || matches.length > 0) return;
+    const startOfMonth = Timestamp.fromDate(new Date(season.year, season.month - 1, 1));
     setMatchesLoading(true);
     const q = query(
       collection(db, "matches"),
-      where("seasonId", "==", seasonId),
-      where("status", "==", "completed"),
+      where("endedAt", ">=", startOfMonth),
+      where("endedAt", "<=", season.endedAt),
       orderBy("endedAt", "desc"),
       limit(10)
     );
@@ -54,15 +56,16 @@ export function SeasonDetailPage() {
       setHasMore(snap.docs.length === 10);
       setMatchesLoading(false);
     });
-  }, [activeTab, seasonId, matches.length]);
+  }, [activeTab, season, matches.length]);
 
   const loadMore = async () => {
-    if (!lastDoc || loadingMore || !hasMore || !seasonId) return;
+    if (!lastDoc || loadingMore || !hasMore || !season) return;
+    const startOfMonth = Timestamp.fromDate(new Date(season.year, season.month - 1, 1));
     setLoadingMore(true);
     const q = query(
       collection(db, "matches"),
-      where("seasonId", "==", seasonId),
-      where("status", "==", "completed"),
+      where("endedAt", ">=", startOfMonth),
+      where("endedAt", "<=", season.endedAt),
       orderBy("endedAt", "desc"),
       startAfter(lastDoc),
       limit(10)
