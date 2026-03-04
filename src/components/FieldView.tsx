@@ -36,7 +36,7 @@ function PlayerCircle({
 }
 
 function initials(username: string) {
-  return username.slice(0, 2).toUpperCase();
+  return username.slice(0, 4).toUpperCase();
 }
 
 export function FieldView({ redTeam, blueTeam }: FieldViewProps) {
