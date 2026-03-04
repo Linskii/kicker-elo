@@ -1,436 +1,571 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 import {
   doc,
   collection,
+  getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   onSnapshot,
+  runTransaction,
   serverTimestamp,
   arrayUnion,
   arrayRemove,
-  getDoc,
-  deleteDoc,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
-import type { Match, User } from "../types";
-import { calculateMatchEloChanges } from "../utils/elo";
-import { checkAndTransitionSeason } from "./seasonStore";
+  Timestamp,
+} from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import type {
+  Match,
+  User,
+  TeamSlot,
+  PlayerEloSnapshot,
+  PlayerEloChange,
+  UserSeasonStats,
+  EloHistoryEntry,
+} from '../types/index.ts';
+import {
+  marginMultiplier,
+  calculateEloChange,
+  computeNewRating,
+  getKFactor,
+  isTeamRanked,
+  isSoloRanked,
+  formatSeasonId,
+} from '../utils/elo.ts';
 
 interface MatchState {
-  currentMatch: Match | null;
+  match: Match | null;
   participants: Record<string, User>;
-  loading: boolean;
-  error: string | null;
-  timer: number;
-  timerRunning: boolean;
-
-  // Actions
-  createMatch: (creatorUid: string) => Promise<string>;
   subscribeToMatch: (matchId: string) => () => void;
-  invitePlayer: (matchId: string, playerUid: string) => Promise<void>;
-  assignToTeam: (
-    matchId: string,
-    playerUid: string,
-    team: "red" | "blue",
-    role: "attacker" | "defender"
-  ) => Promise<void>;
-  removeFromTeam: (
-    matchId: string,
-    team: "red" | "blue",
-    role: "attacker" | "defender"
-  ) => Promise<void>;
+  createMatch: (creatorUid: string) => Promise<string>;
+  invitePlayer: (matchId: string, friendUid: string) => Promise<void>;
+  removePlayer: (matchId: string, playerUid: string) => Promise<void>;
+  assignToTeam: (matchId: string, playerUid: string, slot: TeamSlot) => Promise<void>;
   startMatch: (matchId: string) => Promise<void>;
-  addGoal: (matchId: string, team: "red" | "blue") => Promise<void>;
-  swapRoles: (matchId: string, team: "red" | "blue") => Promise<void>;
-  completeMatch: (matchId: string, finalRedScore?: number, finalBlueScore?: number) => Promise<void>;
-  deleteMatch: (matchId: string) => Promise<void>;
+  addGoal: (matchId: string, side: 'red' | 'blue') => Promise<boolean>;
+  completeMatch: (matchId: string, redScore: number, blueScore: number) => Promise<void>;
   editCompletedMatch: (
     matchId: string,
-    newRedTeam: { attacker: string | null; defender: string | null },
-    newBlueTeam: { attacker: string | null; defender: string | null },
+    newSlots: Partial<Pick<Match, 'redAttacker' | 'redDefender' | 'blueAttacker' | 'blueDefender' | 'playerRed' | 'playerBlue'>>,
     newRedScore: number,
-    newBlueScore: number
+    newBlueScore: number,
   ) => Promise<void>;
-
-  createRematch: (creatorUid: string) => Promise<string>;
-
-  // Lobby viewer tracking
-  joinLobby: (matchId: string, userUid: string) => Promise<void>;
-  leaveLobby: (matchId: string, userUid: string) => Promise<void>;
-  deleteLobby: (matchId: string) => Promise<void>;
-
-  // Timer
-  startTimer: () => void;
-  stopTimer: () => void;
-  resetTimer: () => void;
+  deleteMatch: (matchId: string) => Promise<void>;
+  createRematch: (matchId: string) => Promise<string>;
 }
 
-export const useMatchStore = create<MatchState>((set, get) => {
-  let timerInterval: ReturnType<typeof setInterval> | null = null;
+function buildEloHistoryEntry(
+  endedAt: Timestamp,
+  attackElo: number,
+  defenseElo: number,
+  soloElo: number,
+): EloHistoryEntry {
+  return { t: endedAt, a: attackElo, d: defenseElo, s: soloElo };
+}
 
-  return {
-    currentMatch: null,
-    participants: {},
-    loading: false,
-    error: null,
-    timer: 0,
-    timerRunning: false,
+export const useMatchStore = create<MatchState>((set, _get) => ({
+  match: null,
+  participants: {},
 
-    createMatch: async (creatorUid) => {
-      const matchRef = doc(collection(db, "matches"));
-      const newMatch = {
-        status: "lobby" as const,
-        participants: [creatorUid],
-        redTeam: { attacker: null, defender: null, score: 0 },
-        blueTeam: { attacker: null, defender: null, score: 0 },
-        events: [],
-        createdBy: creatorUid,
-        createdAt: serverTimestamp(),
-      };
+  subscribeToMatch: (matchId) => {
+    const matchRef = doc(db, 'matches', matchId);
+    const participantUnsubs: Record<string, () => void> = {};
 
-      await setDoc(matchRef, newMatch);
-      return matchRef.id;
-    },
+    const unsubMatch = onSnapshot(matchRef, (snap) => {
+      if (!snap.exists()) {
+        set({ match: null, participants: {} });
+        return;
+      }
+      const matchData = { ...snap.data(), id: snap.id } as Match;
+      set({ match: matchData });
 
-    subscribeToMatch: (matchId) => {
-      set({ loading: true });
-
-      const unsubscribe = onSnapshot(
-        doc(db, "matches", matchId),
-        async (snapshot) => {
-          if (snapshot.exists()) {
-            const match = { id: snapshot.id, ...snapshot.data() } as Match;
-            set({ currentMatch: match, loading: false });
-
-            // Fetch participant details
-            const participantIds = match.participants;
-            const participantsMap: Record<string, User> = {};
-
-            for (const uid of participantIds) {
-              const userDoc = await getDoc(doc(db, "users", uid));
-              if (userDoc.exists()) {
-                participantsMap[uid] = {
-                  uid: userDoc.id,
-                  ...userDoc.data(),
-                } as User;
-              }
-            }
-            set({ participants: participantsMap });
-          } else {
-            set({ currentMatch: null, loading: false, error: "Match not found" });
-          }
+      const currentParticipants = matchData.participants;
+      for (const uid of Object.keys(participantUnsubs)) {
+        if (!currentParticipants.includes(uid)) {
+          participantUnsubs[uid]();
+          delete participantUnsubs[uid];
+          set((state) => {
+            const next = { ...state.participants };
+            delete next[uid];
+            return { participants: next };
+          });
         }
-      );
-
-      return unsubscribe;
-    },
-
-    invitePlayer: async (matchId, playerUid) => {
-      // Friends are always trusted - auto-join directly to participants
-      await updateDoc(doc(db, "matches", matchId), {
-        participants: arrayUnion(playerUid),
-      });
-    },
-
-    assignToTeam: async (matchId, playerUid, team, role) => {
-      const match = get().currentMatch;
-      if (!match) return;
-
-      // Remove player from any existing position
-      const updates: Record<string, unknown> = {};
-
-      if (match.redTeam.attacker === playerUid) updates["redTeam.attacker"] = null;
-      if (match.redTeam.defender === playerUid) updates["redTeam.defender"] = null;
-      if (match.blueTeam.attacker === playerUid) updates["blueTeam.attacker"] = null;
-      if (match.blueTeam.defender === playerUid) updates["blueTeam.defender"] = null;
-
-      // Assign to new position
-      updates[`${team}Team.${role}`] = playerUid;
-
-      await updateDoc(doc(db, "matches", matchId), updates);
-    },
-
-    removeFromTeam: async (matchId, team, role) => {
-      await updateDoc(doc(db, "matches", matchId), {
-        [`${team}Team.${role}`]: null,
-      });
-    },
-
-    startMatch: async (matchId) => {
-      await updateDoc(doc(db, "matches", matchId), {
-        status: "live",
-        startedAt: serverTimestamp(),
-      });
-      get().startTimer();
-    },
-
-    addGoal: async (matchId, team) => {
-      const match = get().currentMatch;
-      if (!match || match.status !== "live") return;
-
-      const currentScore = match[`${team}Team`].score;
-      const newScore = currentScore + 1;
-      const otherTeam = team === "red" ? "blue" : "red";
-      const otherScore = match[`${otherTeam}Team`].score;
-
-      await updateDoc(doc(db, "matches", matchId), {
-        [`${team}Team.score`]: newScore,
-        events: arrayUnion({
-          type: "goal",
-          team,
-          time: new Date().toISOString(),
-        }),
-      });
-
-      // Win condition: First to 10 with 2 point lead
-      if (newScore >= 10 && newScore - otherScore >= 2) {
-        // Pass the final scores to completeMatch since local state may be stale
-        const finalRedScore = team === "red" ? newScore : match.redTeam.score;
-        const finalBlueScore = team === "blue" ? newScore : match.blueTeam.score;
-        await get().completeMatch(matchId, finalRedScore, finalBlueScore);
       }
-    },
+      for (const uid of currentParticipants) {
+        if (!participantUnsubs[uid]) {
+          participantUnsubs[uid] = onSnapshot(doc(db, 'users', uid), (userSnap) => {
+            if (userSnap.exists()) {
+              set((state) => ({
+                participants: {
+                  ...state.participants,
+                  [uid]: { ...userSnap.data(), uid: userSnap.id } as User,
+                },
+              }));
+            }
+          });
+        }
+      }
+    });
 
-    swapRoles: async (matchId, team) => {
-      const match = get().currentMatch;
-      if (!match) return;
+    return () => {
+      unsubMatch();
+      for (const unsub of Object.values(participantUnsubs)) unsub();
+    };
+  },
 
-      const teamData = match[`${team}Team`];
-      await updateDoc(doc(db, "matches", matchId), {
-        [`${team}Team.attacker`]: teamData.defender,
-        [`${team}Team.defender`]: teamData.attacker,
-        events: arrayUnion({
-          type: "swap",
-          team,
-          time: new Date().toISOString(),
-        }),
-      });
-    },
+  createMatch: async (creatorUid) => {
+    const matchRef = doc(collection(db, 'matches'));
+    const matchData: Omit<Match, 'id'> = {
+      type: 'solo',
+      status: 'lobby',
+      createdBy: creatorUid,
+      participants: [creatorUid],
+      redAttacker: null,
+      redDefender: null,
+      blueAttacker: null,
+      blueDefender: null,
+      playerRed: null,
+      playerBlue: null,
+      redScore: 0,
+      blueScore: 0,
+      createdAt: serverTimestamp() as unknown as Timestamp,
+    };
+    await setDoc(matchRef, matchData);
+    return matchRef.id;
+  },
 
-    completeMatch: async (matchId, finalRedScore?, finalBlueScore?) => {
-      const match = get().currentMatch;
-      const participants = get().participants;
-      if (!match) return;
+  invitePlayer: async (matchId, friendUid) => {
+    const matchRef = doc(db, 'matches', matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) return;
+    const match = snap.data() as Match;
+    const newCount = match.participants.length + 1;
+    const updates: Record<string, unknown> = {
+      participants: arrayUnion(friendUid),
+    };
+    if (newCount === 2) updates.type = 'solo';
+    if (newCount >= 3) updates.type = 'team';
+    await updateDoc(matchRef, updates);
+  },
 
-      get().stopTimer();
+  removePlayer: async (matchId, playerUid) => {
+    const matchRef = doc(db, 'matches', matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) return;
+    const match = snap.data() as Match;
 
-      // Check for season transition first (may reset all user ELOs to 1000)
-      const seasonId = await checkAndTransitionSeason();
+    const slotClears: Record<string, null> = {};
+    const slotFields: TeamSlot[] = ['redAttacker', 'redDefender', 'blueAttacker', 'blueDefender', 'playerRed', 'playerBlue'];
+    for (const slot of slotFields) {
+      if (match[slot] === playerUid) slotClears[slot] = null;
+    }
 
-      // Use provided final scores or fall back to match state
-      const redScore = finalRedScore ?? match.redTeam.score;
-      const blueScore = finalBlueScore ?? match.blueTeam.score;
+    const newParticipants = match.participants.filter((uid) => uid !== playerUid);
+    if (newParticipants.length === 0) {
+      await deleteDoc(matchRef);
+      return;
+    }
 
-      // Create team objects with correct final scores for Elo calculation
-      const redTeamWithScore = { ...match.redTeam, score: redScore };
-      const blueTeamWithScore = { ...match.blueTeam, score: blueScore };
+    const updates: Record<string, unknown> = {
+      participants: arrayRemove(playerUid),
+      ...slotClears,
+    };
+    if (newParticipants.length <= 2) updates.type = 'solo';
+    await updateDoc(matchRef, updates);
+  },
 
-      // Fetch fresh ELOs post-season-reset so first match of a new season
-      // correctly uses 1000 as the baseline for all players
-      const preMatchElos: Record<string, number> = {};
-      for (const uid of Object.keys(participants)) {
-        const freshDoc = await getDoc(doc(db, "users", uid));
-        if (freshDoc.exists()) preMatchElos[uid] = (freshDoc.data() as User).elo;
+  assignToTeam: async (matchId, playerUid, slot) => {
+    const matchRef = doc(db, 'matches', matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) return;
+    const match = snap.data() as Match;
+
+    const updates: Record<string, string | null> = {};
+    const slotFields: TeamSlot[] = ['redAttacker', 'redDefender', 'blueAttacker', 'blueDefender', 'playerRed', 'playerBlue'];
+    for (const s of slotFields) {
+      if (match[s] === playerUid && s !== slot) updates[s] = null;
+    }
+    for (const s of slotFields) {
+      if (s === slot && match[s] !== null && match[s] !== playerUid) {
+        // Slot occupied by someone else — swap them out
+      }
+    }
+    updates[slot] = playerUid;
+    await updateDoc(matchRef, updates);
+  },
+
+  startMatch: async (matchId) => {
+    await updateDoc(doc(db, 'matches', matchId), {
+      status: 'live',
+      startedAt: serverTimestamp(),
+    });
+  },
+
+  addGoal: async (matchId, side) => {
+    const matchRef = doc(db, 'matches', matchId);
+    const snap = await getDoc(matchRef);
+    if (!snap.exists()) return false;
+    const match = snap.data() as Match;
+
+    const newRed = side === 'red' ? match.redScore + 1 : match.redScore;
+    const newBlue = side === 'blue' ? match.blueScore + 1 : match.blueScore;
+
+    await updateDoc(matchRef, {
+      redScore: newRed,
+      blueScore: newBlue,
+    });
+
+    const maxScore = Math.max(newRed, newBlue);
+    const diff = Math.abs(newRed - newBlue);
+    if (maxScore >= 10 && diff >= 2) {
+      return true;
+    }
+    return false;
+  },
+
+  completeMatch: async (matchId, redScore, blueScore) => {
+    const seasonId = formatSeasonId(new Date());
+
+    await runTransaction(db, async (txn) => {
+      const matchRef = doc(db, 'matches', matchId);
+      const matchSnap = await txn.get(matchRef);
+      if (!matchSnap.exists()) throw new Error('Match not found');
+      const match = { ...matchSnap.data(), id: matchSnap.id } as Match;
+
+      const playerUids = match.participants;
+      const userDocs: Record<string, User> = {};
+      const seasonStatsDocs: Record<string, UserSeasonStats | null> = {};
+
+      for (const uid of playerUids) {
+        const userSnap = await txn.get(doc(db, 'users', uid));
+        if (!userSnap.exists()) throw new Error(`User ${uid} not found`);
+        userDocs[uid] = { ...userSnap.data(), uid: userSnap.id } as User;
+
+        const statsSnap = await txn.get(doc(db, 'users', uid, 'seasonStats', seasonId));
+        seasonStatsDocs[uid] = statsSnap.exists() ? (statsSnap.data() as UserSeasonStats) : null;
       }
 
-      const eloChanges = calculateMatchEloChanges(
-        redTeamWithScore,
-        blueTeamWithScore,
-        preMatchElos
-      );
+      const preMatchElos: Record<string, PlayerEloSnapshot> = {};
+      for (const uid of playerUids) {
+        const u = userDocs[uid];
+        preMatchElos[uid] = {
+          attackElo: u.attackElo,
+          defenseElo: u.defenseElo,
+          soloElo: u.soloElo,
+        };
+      }
 
-      // Update match - include final scores so the result page displays them correctly
-      await updateDoc(doc(db, "matches", matchId), {
-        status: "completed",
-        endedAt: serverTimestamp(),
-        eloChanges,
-        preMatchElos,
-        "redTeam.score": redScore,
-        "blueTeam.score": blueScore,
-        seasonId,
-      });
-
-      // Update each player's stats using fresh Firestore data to avoid stale-state permission errors
       const redWon = redScore > blueScore;
+      const mult = marginMultiplier(
+        redWon ? redScore : blueScore,
+        redWon ? blueScore : redScore,
+      );
 
-      for (const [uid, change] of Object.entries(eloChanges)) {
-        const freshSnap = await getDoc(doc(db, "users", uid));
-        if (!freshSnap.exists()) continue;
-        const freshUser = { uid: freshSnap.id, ...freshSnap.data() } as User;
+      const eloChanges: Record<string, PlayerEloChange> = {};
 
-        const isRed =
-          match.redTeam.attacker === uid || match.redTeam.defender === uid;
-        const won = isRed ? redWon : !redWon;
+      if (match.type === 'solo') {
+        const redUid = match.playerRed!;
+        const blueUid = match.playerBlue!;
+        const redElo = userDocs[redUid].soloElo;
+        const blueElo = userDocs[blueUid].soloElo;
 
-        await updateDoc(doc(db, "users", uid), {
-          elo: freshUser.elo + change,
-          matchesPlayed: freshUser.matchesPlayed + 1,
-          wins: freshUser.wins + (won ? 1 : 0),
-          losses: freshUser.losses + (won ? 0 : 1),
+        const redK = getKFactor(seasonStatsDocs[redUid]?.soloMatchesPlayed ?? 0);
+        const blueK = getKFactor(seasonStatsDocs[blueUid]?.soloMatchesPlayed ?? 0);
+
+        const redActual = redWon ? 1 : 0;
+        const blueActual = redWon ? 0 : 1;
+
+        const redChange = calculateEloChange(redElo, blueElo, redActual, redK, mult);
+        const blueChange = calculateEloChange(blueElo, redElo, blueActual, blueK, mult);
+
+        eloChanges[redUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: redChange };
+        eloChanges[blueUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: blueChange };
+      } else {
+        const redAtkUid = match.redAttacker!;
+        const redDefUid = match.redDefender!;
+        const blueAtkUid = match.blueAttacker!;
+        const blueDefUid = match.blueDefender!;
+
+        const redTeamRating = (userDocs[redAtkUid].attackElo + userDocs[redDefUid].defenseElo) / 2;
+        const blueTeamRating = (userDocs[blueAtkUid].attackElo + userDocs[blueDefUid].defenseElo) / 2;
+
+        const redActual = redWon ? 1 : 0;
+        const blueActual = redWon ? 0 : 1;
+
+        // Attackers
+        const redAtkK = getKFactor(seasonStatsDocs[redAtkUid]?.attackMatchesPlayed ?? 0);
+        const blueAtkK = getKFactor(seasonStatsDocs[blueAtkUid]?.attackMatchesPlayed ?? 0);
+        const redAtkChange = calculateEloChange(redTeamRating, blueTeamRating, redActual, redAtkK, mult);
+        const blueAtkChange = calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueAtkK, mult);
+
+        // Defenders
+        const redDefK = getKFactor(seasonStatsDocs[redDefUid]?.defenseMatchesPlayed ?? 0);
+        const blueDefK = getKFactor(seasonStatsDocs[blueDefUid]?.defenseMatchesPlayed ?? 0);
+        const redDefChange = calculateEloChange(redTeamRating, blueTeamRating, redActual, redDefK, mult);
+        const blueDefChange = calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueDefK, mult);
+
+        eloChanges[redAtkUid] = {
+          attackEloDelta: redAtkChange,
+          defenseEloDelta: 0,
+          soloEloDelta: 0,
+        };
+        eloChanges[redDefUid] = {
+          attackEloDelta: 0,
+          defenseEloDelta: redDefChange,
+          soloEloDelta: 0,
+        };
+        eloChanges[blueAtkUid] = {
+          attackEloDelta: blueAtkChange,
+          defenseEloDelta: 0,
+          soloEloDelta: 0,
+        };
+        eloChanges[blueDefUid] = {
+          attackEloDelta: 0,
+          defenseEloDelta: blueDefChange,
+          soloEloDelta: 0,
+        };
+      }
+
+      // Write match
+      const endedAt = Timestamp.now();
+      txn.update(matchRef, {
+        status: 'completed',
+        seasonId,
+        preMatchElos,
+        eloChanges,
+        redScore,
+        blueScore,
+        endedAt: serverTimestamp(),
+      });
+
+      // Update each player
+      for (const uid of playerUids) {
+        const u = userDocs[uid];
+        const change = eloChanges[uid];
+        const isWinner = (redWon && isOnRedTeam(match, uid)) || (!redWon && isOnBlueTeam(match, uid));
+
+        const newAttackElo = computeNewRating(u.attackElo, change.attackEloDelta);
+        const newDefenseElo = computeNewRating(u.defenseElo, change.defenseEloDelta);
+        const newSoloElo = computeNewRating(u.soloElo, change.soloEloDelta);
+
+        const statsRef = doc(db, 'users', uid, 'seasonStats', seasonId);
+        const existing = seasonStatsDocs[uid];
+        const newStats: UserSeasonStats = {
+          seasonId,
+          attackMatchesPlayed: (existing?.attackMatchesPlayed ?? 0) +
+            (match.type === 'team' && (match.redAttacker === uid || match.blueAttacker === uid) ? 1 : 0),
+          defenseMatchesPlayed: (existing?.defenseMatchesPlayed ?? 0) +
+            (match.type === 'team' && (match.redDefender === uid || match.blueDefender === uid) ? 1 : 0),
+          soloMatchesPlayed: (existing?.soloMatchesPlayed ?? 0) +
+            (match.type === 'solo' ? 1 : 0),
+        };
+        txn.set(statsRef, newStats);
+
+        const newTeamRanked = isTeamRanked(newStats);
+        const newSoloRanked = isSoloRanked(newStats);
+
+        const historyEntry = buildEloHistoryEntry(endedAt, newAttackElo, newDefenseElo, newSoloElo);
+
+        txn.update(doc(db, 'users', uid), {
+          attackElo: newAttackElo,
+          defenseElo: newDefenseElo,
+          soloElo: newSoloElo,
+          wins: u.wins + (isWinner ? 1 : 0),
+          losses: u.losses + (isWinner ? 0 : 1),
+          careerWins: u.careerWins + (isWinner ? 1 : 0),
+          careerLosses: u.careerLosses + (isWinner ? 0 : 1),
+          teamRanked: newTeamRanked,
+          soloRanked: newSoloRanked,
+          eloHistory: arrayUnion(historyEntry),
         });
       }
-    },
+    });
+  },
 
-    deleteMatch: async (matchId) => {
-      const matchRef = doc(db, "matches", matchId);
-      const matchSnap = await getDoc(matchRef);
-      if (!matchSnap.exists()) return;
-      const match = matchSnap.data() as Match;
-      if (match.status !== "live") return;
-      await deleteDoc(matchRef);
-    },
+  editCompletedMatch: async (matchId, newSlots, newRedScore, newBlueScore) => {
+    await runTransaction(db, async (txn) => {
+      const matchRef = doc(db, 'matches', matchId);
+      const matchSnap = await txn.get(matchRef);
+      if (!matchSnap.exists()) throw new Error('Match not found');
+      const match = { ...matchSnap.data(), id: matchSnap.id } as Match;
 
-    editCompletedMatch: async (matchId, newRedTeam, newBlueTeam, newRedScore, newBlueScore) => {
-      const matchSnap = await getDoc(doc(db, "matches", matchId));
-      if (!matchSnap.exists()) return;
-      const match = { id: matchSnap.id, ...matchSnap.data() } as Match;
+      if (match.status !== 'completed') throw new Error('Match is not completed');
+      if (!match.endedAt || !match.preMatchElos || !match.eloChanges) {
+        throw new Error('Match missing completion data');
+      }
 
-      const oldEloChanges = match.eloChanges ?? {};
-      const preMatchElos = match.preMatchElos ?? {};
-      const oldRedWon = match.redTeam.score > match.blueTeam.score;
+      const now = Timestamp.now();
+      const tenMinMs = 10 * 60 * 1000;
+      if (now.toMillis() - match.endedAt.toMillis() > tenMinMs) {
+        throw new Error('Edit window has expired');
+      }
+
+      const oldEloChanges = match.eloChanges;
+      const preMatchElos = match.preMatchElos;
+      const playerUids = match.participants;
+      const oldRedWon = match.redScore > match.blueScore;
+
+      // Read current user docs
+      const userDocs: Record<string, User> = {};
+      const seasonStatsDocs: Record<string, UserSeasonStats | null> = {};
+      const seasonId = match.seasonId!;
+
+      for (const uid of playerUids) {
+        const userSnap = await txn.get(doc(db, 'users', uid));
+        if (!userSnap.exists()) throw new Error(`User ${uid} not found`);
+        userDocs[uid] = { ...userSnap.data(), uid: userSnap.id } as User;
+
+        const statsSnap = await txn.get(doc(db, 'users', uid, 'seasonStats', seasonId));
+        seasonStatsDocs[uid] = statsSnap.exists() ? (statsSnap.data() as UserSeasonStats) : null;
+      }
+
+      // Build updated match with new slots
+      const updatedMatch: Match = {
+        ...match,
+        ...newSlots,
+      };
+
+      // Recalculate ELO from preMatchElos
       const newRedWon = newRedScore > newBlueScore;
-
-      const newRedTeamWithScore = { ...newRedTeam, score: newRedScore };
-      const newBlueTeamWithScore = { ...newBlueTeam, score: newBlueScore };
-
-      const newEloChanges = calculateMatchEloChanges(
-        newRedTeamWithScore,
-        newBlueTeamWithScore,
-        preMatchElos
+      const mult = marginMultiplier(
+        newRedWon ? newRedScore : newBlueScore,
+        newRedWon ? newBlueScore : newRedScore,
       );
 
-      // Only update players who were on a team in the old or new match
-      const teamPlayerUids = new Set([
-        ...Object.keys(oldEloChanges),
-        ...Object.keys(newEloChanges),
-      ]);
+      const newEloChanges: Record<string, PlayerEloChange> = {};
 
-      // Fetch current user data for team players only
-      const userDocs: Record<string, User> = {};
-      for (const uid of teamPlayerUids) {
-        const ud = await getDoc(doc(db, "users", uid));
-        if (ud.exists()) userDocs[uid] = { uid: ud.id, ...ud.data() } as User;
+      if (updatedMatch.type === 'solo') {
+        const redUid = updatedMatch.playerRed!;
+        const blueUid = updatedMatch.playerBlue!;
+        const redElo = preMatchElos[redUid].soloElo;
+        const blueElo = preMatchElos[blueUid].soloElo;
+
+        const redK = getKFactor((seasonStatsDocs[redUid]?.soloMatchesPlayed ?? 1) - 1);
+        const blueK = getKFactor((seasonStatsDocs[blueUid]?.soloMatchesPlayed ?? 1) - 1);
+
+        const redChange = calculateEloChange(redElo, blueElo, newRedWon ? 1 : 0, redK, mult);
+        const blueChange = calculateEloChange(blueElo, redElo, newRedWon ? 0 : 1, blueK, mult);
+
+        newEloChanges[redUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: redChange };
+        newEloChanges[blueUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: blueChange };
+      } else {
+        const redAtkUid = updatedMatch.redAttacker!;
+        const redDefUid = updatedMatch.redDefender!;
+        const blueAtkUid = updatedMatch.blueAttacker!;
+        const blueDefUid = updatedMatch.blueDefender!;
+
+        const redTeamRating = (preMatchElos[redAtkUid].attackElo + preMatchElos[redDefUid].defenseElo) / 2;
+        const blueTeamRating = (preMatchElos[blueAtkUid].attackElo + preMatchElos[blueDefUid].defenseElo) / 2;
+
+        const redActual = newRedWon ? 1 : 0;
+        const blueActual = newRedWon ? 0 : 1;
+
+        const redAtkK = getKFactor((seasonStatsDocs[redAtkUid]?.attackMatchesPlayed ?? 1) - 1);
+        const blueAtkK = getKFactor((seasonStatsDocs[blueAtkUid]?.attackMatchesPlayed ?? 1) - 1);
+        const redDefK = getKFactor((seasonStatsDocs[redDefUid]?.defenseMatchesPlayed ?? 1) - 1);
+        const blueDefK = getKFactor((seasonStatsDocs[blueDefUid]?.defenseMatchesPlayed ?? 1) - 1);
+
+        newEloChanges[redAtkUid] = { attackEloDelta: calculateEloChange(redTeamRating, blueTeamRating, redActual, redAtkK, mult), defenseEloDelta: 0, soloEloDelta: 0 };
+        newEloChanges[redDefUid] = { attackEloDelta: 0, defenseEloDelta: calculateEloChange(redTeamRating, blueTeamRating, redActual, redDefK, mult), soloEloDelta: 0 };
+        newEloChanges[blueAtkUid] = { attackEloDelta: calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueAtkK, mult), defenseEloDelta: 0, soloEloDelta: 0 };
+        newEloChanges[blueDefUid] = { attackEloDelta: 0, defenseEloDelta: calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueDefK, mult), soloEloDelta: 0 };
       }
 
       // Update match document
-      await updateDoc(doc(db, "matches", matchId), {
-        redTeam: newRedTeamWithScore,
-        blueTeam: newBlueTeamWithScore,
+      txn.update(matchRef, {
+        ...newSlots,
+        redScore: newRedScore,
+        blueScore: newBlueScore,
         eloChanges: newEloChanges,
       });
 
-      // Apply net ELO delta and update wins/losses if outcome changed
-      for (const uid of teamPlayerUids) {
-        const user = userDocs[uid];
-        if (!user) continue;
+      // Update each player: reverse old delta, apply new delta, fix wins/losses
+      for (const uid of playerUids) {
+        const u = userDocs[uid];
+        const oldChange = oldEloChanges[uid];
+        const newChange = newEloChanges[uid];
 
-        const oldChange = oldEloChanges[uid] ?? 0;
-        const newChange = newEloChanges[uid] ?? 0;
-        const netEloDelta = newChange - oldChange;
+        // Reverse old, apply new
+        const newAttackElo = computeNewRating(
+          u.attackElo - Math.round(oldChange.attackEloDelta),
+          newChange.attackEloDelta,
+        );
+        const newDefenseElo = computeNewRating(
+          u.defenseElo - Math.round(oldChange.defenseEloDelta),
+          newChange.defenseEloDelta,
+        );
+        const newSoloElo = computeNewRating(
+          u.soloElo - Math.round(oldChange.soloEloDelta),
+          newChange.soloEloDelta,
+        );
 
-        const wasOnOldRed =
-          match.redTeam.attacker === uid || match.redTeam.defender === uid;
-        const isOnNewRed =
-          newRedTeam.attacker === uid || newRedTeam.defender === uid;
-        const oldWon = wasOnOldRed ? oldRedWon : !oldRedWon;
-        const newWon = isOnNewRed ? newRedWon : !newRedWon;
+        // Fix wins/losses
+        const wasWinner = (oldRedWon && isOnRedTeam(match, uid)) || (!oldRedWon && isOnBlueTeam(match, uid));
+        const isWinner = (newRedWon && isOnRedTeam(updatedMatch, uid)) || (!newRedWon && isOnBlueTeam(updatedMatch, uid));
 
-        const winsDelta = (newWon ? 1 : 0) - (oldWon ? 1 : 0);
-        const lossesDelta = (newWon ? 0 : 1) - (oldWon ? 0 : 1);
+        let winsAdj = 0;
+        let lossesAdj = 0;
+        if (wasWinner && !isWinner) { winsAdj = -1; lossesAdj = 1; }
+        if (!wasWinner && isWinner) { winsAdj = 1; lossesAdj = -1; }
 
-        await updateDoc(doc(db, "users", uid), {
-          elo: user.elo + netEloDelta,
-          wins: user.wins + winsDelta,
-          losses: user.losses + lossesDelta,
+        // Update eloHistory — find entry matching endedAt and overwrite
+        const newHistory = u.eloHistory.map((entry) => {
+          if (entry.t.toMillis() === match.endedAt!.toMillis()) {
+            return buildEloHistoryEntry(entry.t, newAttackElo, newDefenseElo, newSoloElo);
+          }
+          return entry;
+        });
+
+        txn.update(doc(db, 'users', uid), {
+          attackElo: newAttackElo,
+          defenseElo: newDefenseElo,
+          soloElo: newSoloElo,
+          wins: u.wins + winsAdj,
+          losses: u.losses + lossesAdj,
+          careerWins: u.careerWins + winsAdj,
+          careerLosses: u.careerLosses + lossesAdj,
+          eloHistory: newHistory,
         });
       }
-    },
+    });
+  },
 
-    joinLobby: async (matchId, userUid) => {
-      const matchRef = doc(db, "matches", matchId);
-      const matchSnap = await getDoc(matchRef);
-      if (!matchSnap.exists()) return;
-      if (matchSnap.data().status !== "lobby") return;
-      await updateDoc(matchRef, {
-        viewers: arrayUnion(userUid),
-      });
-    },
+  deleteMatch: async (matchId) => {
+    await deleteDoc(doc(db, 'matches', matchId));
+  },
 
-    leaveLobby: async (matchId, userUid) => {
-      const matchRef = doc(db, "matches", matchId);
-      const matchSnap = await getDoc(matchRef);
+  createRematch: async (matchId) => {
+    const snap = await getDoc(doc(db, 'matches', matchId));
+    if (!snap.exists()) throw new Error('Match not found');
+    const old = snap.data() as Match;
 
-      if (!matchSnap.exists()) return;
+    const newMatchRef = doc(collection(db, 'matches'));
+    const newMatch: Omit<Match, 'id'> = {
+      type: old.type,
+      status: 'lobby',
+      createdBy: old.createdBy,
+      participants: old.participants,
+      redAttacker: old.redAttacker,
+      redDefender: old.redDefender,
+      blueAttacker: old.blueAttacker,
+      blueDefender: old.blueDefender,
+      playerRed: old.playerRed,
+      playerBlue: old.playerBlue,
+      redScore: 0,
+      blueScore: 0,
+      createdAt: serverTimestamp() as unknown as Timestamp,
+    };
+    await setDoc(newMatchRef, newMatch);
+    return newMatchRef.id;
+  },
+}));
 
-      const match = matchSnap.data() as Match;
+function isOnRedTeam(match: Match, uid: string): boolean {
+  return match.playerRed === uid || match.redAttacker === uid || match.redDefender === uid;
+}
 
-      // Only delete if match is still in lobby status
-      if (match.status !== "lobby") return;
+function isOnBlueTeam(match: Match, uid: string): boolean {
+  return match.playerBlue === uid || match.blueAttacker === uid || match.blueDefender === uid;
+}
 
-      const currentViewers = match.viewers || [];
-      const newViewers = currentViewers.filter((uid: string) => uid !== userUid);
-
-      if (newViewers.length === 0) {
-        // Last viewer left, delete the lobby
-        await deleteDoc(matchRef);
-      } else {
-        // Remove this viewer
-        await updateDoc(matchRef, {
-          viewers: arrayRemove(userUid),
-        });
-      }
-    },
-
-    createRematch: async (creatorUid) => {
-      const match = get().currentMatch;
-      if (!match) throw new Error("No current match");
-
-      const matchRef = doc(collection(db, "matches"));
-      await setDoc(matchRef, {
-        status: "lobby" as const,
-        participants: match.participants,
-        redTeam: { attacker: match.redTeam.attacker, defender: match.redTeam.defender, score: 0 },
-        blueTeam: { attacker: match.blueTeam.attacker, defender: match.blueTeam.defender, score: 0 },
-        events: [],
-        createdBy: creatorUid,
-        createdAt: serverTimestamp(),
-      });
-      return matchRef.id;
-    },
-
-    deleteLobby: async (matchId) => {
-      const matchRef = doc(db, "matches", matchId);
-      const matchSnap = await getDoc(matchRef);
-
-      if (!matchSnap.exists()) return;
-
-      const match = matchSnap.data() as Match;
-
-      // Only delete if match is still in lobby status
-      if (match.status !== "lobby") return;
-
-      await deleteDoc(matchRef);
-    },
-
-    startTimer: () => {
-      if (timerInterval) clearInterval(timerInterval);
-      set({ timerRunning: true });
-      timerInterval = setInterval(() => {
-        set((state) => ({ timer: state.timer + 1 }));
-      }, 1000);
-    },
-
-    stopTimer: () => {
-      if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-      }
-      set({ timerRunning: false });
-    },
-
-    resetTimer: () => {
-      get().stopTimer();
-      set({ timer: 0 });
-    },
-  };
-});
+export { isOnRedTeam, isOnBlueTeam };

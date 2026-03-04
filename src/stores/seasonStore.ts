@@ -1,226 +1,157 @@
-import { create } from "zustand";
+import { create } from 'zustand';
 import {
-  doc,
   collection,
+  doc,
   getDoc,
   getDocs,
-  setDoc,
   updateDoc,
-  deleteDoc,
   query,
   orderBy,
-  limit,
   runTransaction,
-  writeBatch,
   serverTimestamp,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
-import type { Season, SeasonPlayer } from "../types";
-
-// --- Utility helpers ---
-
-function getYearMonth(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${year}-${month}`;
-}
-
-function makeLabel(yearMonth: string): string {
-  const [year, month] = yearMonth.split("-");
-  const date = new Date(Number(year), Number(month) - 1, 1);
-  return date.toLocaleString("en-US", { month: "long", year: "numeric" });
-}
-
-async function buildLeaderboardSnapshot(): Promise<SeasonPlayer[]> {
-  const q = query(collection(db, "users"), orderBy("elo", "desc"));
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => {
-    const data = d.data();
-    return {
-      uid: d.id,
-      username: data.username,
-      elo: data.elo,
-      wins: data.wins,
-      losses: data.losses,
-      matchesPlayed: data.matchesPlayed,
-    };
-  });
-}
-
-async function resetAllUserElos(): Promise<void> {
-  const usersSnap = await getDocs(collection(db, "users"));
-  const BATCH_SIZE = 500;
-  const docs = usersSnap.docs;
-  for (let i = 0; i < docs.length; i += BATCH_SIZE) {
-    const batch = writeBatch(db);
-    for (const userDoc of docs.slice(i, i + BATCH_SIZE)) {
-      batch.update(userDoc.ref, { elo: 1000 });
-    }
-    await batch.commit();
-  }
-}
-
-// --- Exported: called from matchStore before completing a match ---
-
-export async function checkAndTransitionSeason(): Promise<string> {
-  const todayYearMonth = getYearMonth(new Date());
-  const configRef = doc(db, "config", "seasons");
-
-  const configSnap = await getDoc(configRef);
-
-  // Bootstrap: no config doc yet
-  if (!configSnap.exists()) {
-    await setDoc(configRef, { currentSeasonId: todayYearMonth });
-    return todayYearMonth;
-  }
-
-  const currentSeasonId = configSnap.data().currentSeasonId as string;
-
-  // Fast path: still in the same month
-  if (currentSeasonId === todayYearMonth) {
-    return todayYearMonth;
-  }
-
-  // Month changed — snapshot leaderboard before entering transaction
-  const leaderboardSnapshot = await buildLeaderboardSnapshot();
-  const oldSeasonRef = doc(db, "seasons", currentSeasonId);
-  const [year, month] = currentSeasonId.split("-").map(Number);
-  const label = makeLabel(currentSeasonId);
-
-  let shouldResetElos = false;
-
-  await runTransaction(db, async (transaction) => {
-    const txConfigSnap = await transaction.get(configRef);
-    const txCurrentId = txConfigSnap.exists()
-      ? (txConfigSnap.data().currentSeasonId as string)
-      : null;
-
-    // Another client already completed the transition
-    if (txCurrentId === todayYearMonth) return;
-
-    const oldSeasonSnap = await transaction.get(oldSeasonRef);
-
-    if (!oldSeasonSnap.exists()) {
-      // We are the first client to close this season
-      shouldResetElos = true;
-      transaction.set(oldSeasonRef, {
-        id: currentSeasonId,
-        label,
-        year,
-        month,
-        status: "completed",
-        endedAt: serverTimestamp(),
-        leaderboard: leaderboardSnapshot,
-      });
-    }
-
-    transaction.update(configRef, { currentSeasonId: todayYearMonth });
-  });
-
-  if (shouldResetElos) {
-    await resetAllUserElos();
-  }
-
-  return todayYearMonth;
-}
-
-// --- Admin-only actions ---
-
-export async function adminCloseSeason(): Promise<void> {
-  const configRef = doc(db, "config", "seasons");
-  const configSnap = await getDoc(configRef);
-
-  const todayYearMonth = getYearMonth(new Date());
-  const currentSeasonId = configSnap.exists()
-    ? (configSnap.data().currentSeasonId as string)
-    : todayYearMonth;
-
-  const leaderboardSnapshot = await buildLeaderboardSnapshot();
-  const [year, month] = currentSeasonId.split("-").map(Number);
-  const label = makeLabel(currentSeasonId);
-
-  await setDoc(doc(db, "seasons", currentSeasonId), {
-    id: currentSeasonId,
-    label,
-    year,
-    month,
-    status: "completed",
-    endedAt: serverTimestamp(),
-    leaderboard: leaderboardSnapshot,
-  });
-
-  await updateDoc(configRef, { currentSeasonId: todayYearMonth });
-  await resetAllUserElos();
-}
-
-export async function adminBootstrapPastSeason(yearMonth: string): Promise<void> {
-  if (!/^\d{4}-\d{2}$/.test(yearMonth)) {
-    throw new Error("Invalid format. Use YYYY-MM.");
-  }
-
-  const seasonRef = doc(db, "seasons", yearMonth);
-  const existing = await getDoc(seasonRef);
-  if (existing.exists()) {
-    throw new Error(`Season ${yearMonth} already exists.`);
-  }
-
-  const leaderboardSnapshot = await buildLeaderboardSnapshot();
-  const [year, month] = yearMonth.split("-").map(Number);
-  const label = makeLabel(yearMonth);
-
-  await setDoc(seasonRef, {
-    id: yearMonth,
-    label,
-    year,
-    month,
-    status: "completed",
-    endedAt: serverTimestamp(),
-    leaderboard: leaderboardSnapshot,
-  });
-}
-
-export async function adminDeleteSeason(seasonId: string): Promise<void> {
-  await deleteDoc(doc(db, "seasons", seasonId));
-}
-
-export async function adminUpdateSeasonLabel(seasonId: string, label: string): Promise<void> {
-  await updateDoc(doc(db, "seasons", seasonId), { label });
-}
-
-// --- Zustand store for reading seasons in the UI ---
+} from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import type { Season, SeasonsConfig, User, SeasonPlayer } from '../types/index.ts';
+import { computeTeamElo, formatSeasonId, formatSeasonLabel } from '../utils/elo.ts';
 
 interface SeasonState {
   seasons: Season[];
-  loading: boolean;
+  currentSeasonConfig: SeasonsConfig | null;
   fetchSeasons: () => Promise<void>;
   fetchSeasonById: (seasonId: string) => Promise<Season | null>;
+  fetchCurrentSeasonConfig: () => Promise<void>;
+  adminCloseSeason: () => Promise<void>;
+  adminUpdateSeasonLabel: (seasonId: string, label: string) => Promise<void>;
 }
 
-export const useSeasonStore = create<SeasonState>((set) => ({
+export const useSeasonStore = create<SeasonState>((set, get) => ({
   seasons: [],
-  loading: false,
+  currentSeasonConfig: null,
 
   fetchSeasons: async () => {
-    set({ loading: true });
-    try {
-      // No orderBy needed — sort client-side to avoid requiring a composite index
-      const snap = await getDocs(query(collection(db, "seasons"), limit(24)));
-      const seasons = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as Season)
-        .sort((a, b) => b.year !== a.year ? b.year - a.year : b.month - a.month);
-      set({ seasons, loading: false });
-    } catch {
-      set({ loading: false });
+    const q = query(collection(db, 'seasons'), orderBy('endedAt', 'desc'));
+    const snap = await getDocs(q);
+    const seasons = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Season);
+    set({ seasons });
+  },
+
+  fetchSeasonById: async (seasonId) => {
+    const snap = await getDoc(doc(db, 'seasons', seasonId));
+    if (!snap.exists()) return null;
+    return { ...snap.data(), id: snap.id } as Season;
+  },
+
+  fetchCurrentSeasonConfig: async () => {
+    const snap = await getDoc(doc(db, 'config', 'seasons'));
+    if (snap.exists()) {
+      set({ currentSeasonConfig: snap.data() as SeasonsConfig });
     }
   },
 
-  fetchSeasonById: async (seasonId: string) => {
-    try {
-      const snap = await getDoc(doc(db, "seasons", seasonId));
-      if (!snap.exists()) return null;
-      return { id: snap.id, ...snap.data() } as Season;
-    } catch {
-      return null;
-    }
+  adminCloseSeason: async () => {
+    await runTransaction(db, async (txn) => {
+      const configRef = doc(db, 'config', 'seasons');
+      const configSnap = await txn.get(configRef);
+      if (!configSnap.exists()) throw new Error('Season config not found');
+      const config = configSnap.data() as SeasonsConfig;
+      const currentSeasonId = config.currentSeasonId;
+
+      // Read all users
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const users: User[] = usersSnap.docs.map((d) => ({ ...d.data(), uid: d.id }) as User);
+
+      // Read season stats for all users
+      const statsMap: Record<string, { attackMatchesPlayed: number; defenseMatchesPlayed: number; soloMatchesPlayed: number }> = {};
+      for (const user of users) {
+        const statsSnap = await getDoc(doc(db, 'users', user.uid, 'seasonStats', currentSeasonId));
+        if (statsSnap.exists()) {
+          statsMap[user.uid] = statsSnap.data() as { attackMatchesPlayed: number; defenseMatchesPlayed: number; soloMatchesPlayed: number };
+        }
+      }
+
+      // Build leaderboards
+      const teamLeaderboard: SeasonPlayer[] = [];
+      const soloLeaderboard: SeasonPlayer[] = [];
+
+      for (const user of users) {
+        const stats = statsMap[user.uid] ?? null;
+        if (user.teamRanked) {
+          const tElo = computeTeamElo(user.attackElo, user.defenseElo, stats);
+          if (tElo !== null) {
+            teamLeaderboard.push({
+              uid: user.uid,
+              username: user.username,
+              attackElo: user.attackElo,
+              defenseElo: user.defenseElo,
+              soloElo: user.soloElo,
+              teamElo: tElo,
+              wins: user.wins,
+              losses: user.losses,
+            });
+          }
+        }
+        if (user.soloRanked) {
+          const tElo = computeTeamElo(user.attackElo, user.defenseElo, stats);
+          soloLeaderboard.push({
+            uid: user.uid,
+            username: user.username,
+            attackElo: user.attackElo,
+            defenseElo: user.defenseElo,
+            soloElo: user.soloElo,
+            teamElo: tElo ?? 1000,
+            wins: user.wins,
+            losses: user.losses,
+          });
+        }
+      }
+
+      teamLeaderboard.sort((a, b) => b.teamElo - a.teamElo);
+      soloLeaderboard.sort((a, b) => b.soloElo - a.soloElo);
+
+      // Parse current season for label
+      const label = formatSeasonLabel(currentSeasonId);
+      const [yearStr, monthStr] = currentSeasonId.split('-');
+
+      // Write season document
+      txn.set(doc(db, 'seasons', currentSeasonId), {
+        id: currentSeasonId,
+        label,
+        year: Number(yearStr),
+        month: Number(monthStr),
+        status: 'completed',
+        endedAt: serverTimestamp(),
+        teamLeaderboard,
+        soloLeaderboard,
+      });
+
+      // Update config to new season
+      const newSeasonId = formatSeasonId(new Date());
+      txn.update(configRef, { currentSeasonId: newSeasonId });
+
+      // Reset all users — must use batch outside transaction
+      // Since we can't do more than 500 writes in a transaction, use the transaction for smaller sets
+      for (const user of users) {
+        txn.update(doc(db, 'users', user.uid), {
+          attackElo: 1000,
+          defenseElo: 1000,
+          soloElo: 1000,
+          wins: 0,
+          losses: 0,
+          teamRanked: false,
+          soloRanked: false,
+        });
+      }
+    });
+
+    // Refresh data
+    await get().fetchSeasons();
+    await get().fetchCurrentSeasonConfig();
+  },
+
+  adminUpdateSeasonLabel: async (seasonId, label) => {
+    await updateDoc(doc(db, 'seasons', seasonId), { label });
+    set((state) => ({
+      seasons: state.seasons.map((s) => (s.id === seasonId ? { ...s, label } : s)),
+    }));
   },
 }));

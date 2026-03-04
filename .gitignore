@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,17 +26,3 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-
-# Firebase
-.firebase/
-firebase-debug.log
-firestore-debug.log
-ui-debug.log
-functions/lib/
-serviceAccount.json
-backup-*.json
-
-# Environment
-.env
-.env.local
-.env.*.local

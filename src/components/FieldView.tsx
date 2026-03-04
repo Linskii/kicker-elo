@@ -1,86 +1,47 @@
-import type { User } from "../types";
+import type { Match, User } from '../types/index.ts';
 
-interface FieldViewProps {
-  redTeam: { attacker: User | null; defender: User | null };
-  blueTeam: { attacker: User | null; defender: User | null };
+interface Props {
+  match: Match;
+  participants: Record<string, User>;
 }
 
-function PlayerCircle({
-  cx,
-  cy,
-  color,
-  label,
-}: {
-  cx: number;
-  cy: number;
-  color: string;
-  label: string;
-}) {
+function PlayerCircle({ user, color, x, y }: { user: User | undefined; color: string; x: number; y: number }): React.ReactElement {
+  const initials = user ? user.username.slice(0, 2).toUpperCase() : '??';
   return (
     <g>
-      <circle cx={cx} cy={cy} r={27} fill={color} />
-      <text
-        x={cx}
-        y={cy}
-        textAnchor="middle"
-        dominantBaseline="central"
-        fill="white"
-        fontSize={14}
-        fontWeight="bold"
-        fontFamily="sans-serif"
-      >
-        {label}
-      </text>
+      <circle cx={x} cy={y} r={20} fill={color} opacity={0.8} />
+      <text x={x} y={y + 5} textAnchor="middle" fill="white" fontSize="12" fontWeight="bold">{initials}</text>
     </g>
   );
 }
 
-function initials(username: string) {
-  return username.slice(0, 4).toUpperCase();
-}
-
-export function FieldView({ redTeam, blueTeam }: FieldViewProps) {
-  const stroke = "#51a2ff";
-  const sw = 3;
-  const cy = 140;
+export function FieldView({ match, participants }: Props): React.ReactElement {
+  const isSolo = match.type === 'solo';
 
   return (
-    <svg viewBox="0 0 560 280" className="w-full" style={{ maxHeight: 180 }}>
-      {/* Field background */}
-      <rect
-        x={20} y={5} width={520} height={270}
-        rx={10} fill="#364153" stroke={stroke} strokeWidth={sw}
-      />
-      {/* Left goal */}
-      <rect
-        x={20} y={105} width={18} height={70}
-        fill="none" stroke={stroke} strokeWidth={sw}
-      />
-      {/* Right goal */}
-      <rect
-        x={522} y={105} width={18} height={70}
-        fill="none" stroke={stroke} strokeWidth={sw}
-      />
+    <svg viewBox="0 0 300 200" className="w-full max-w-md mx-auto rounded-lg overflow-hidden">
+      {/* Field */}
+      <rect x="0" y="0" width="300" height="200" fill="#2d8a4e" />
       {/* Center line */}
-      <line x1={280} y1={5} x2={280} y2={275} stroke={stroke} strokeWidth={sw} />
+      <line x1="150" y1="0" x2="150" y2="200" stroke="white" strokeWidth="2" opacity="0.5" />
       {/* Center circle */}
-      <circle cx={280} cy={140} r={52} fill="none" stroke={stroke} strokeWidth={sw} />
+      <circle cx="150" cy="100" r="30" stroke="white" strokeWidth="2" fill="none" opacity="0.5" />
+      {/* Goals */}
+      <rect x="0" y="70" width="15" height="60" stroke="white" strokeWidth="2" fill="none" opacity="0.5" />
+      <rect x="285" y="70" width="15" height="60" stroke="white" strokeWidth="2" fill="none" opacity="0.5" />
 
-      {/* Red Defender (near left/red goal, grows toward center) */}
-      {redTeam.defender && (
-        <PlayerCircle cx={74} cy={cy} color="#ef4444" label={initials(redTeam.defender.username)} />
-      )}
-      {/* Blue Attacker (attacking left/red goal, grows toward it) */}
-      {blueTeam.attacker && (
-        <PlayerCircle cx={176} cy={cy} color="#3b82f6" label={initials(blueTeam.attacker.username)} />
-      )}
-      {/* Red Attacker (attacking right/blue goal, grows toward it) */}
-      {redTeam.attacker && (
-        <PlayerCircle cx={384} cy={cy} color="#ef4444" label={initials(redTeam.attacker.username)} />
-      )}
-      {/* Blue Defender (near right/blue goal, grows toward center) */}
-      {blueTeam.defender && (
-        <PlayerCircle cx={486} cy={cy} color="#3b82f6" label={initials(blueTeam.defender.username)} />
+      {isSolo ? (
+        <>
+          <PlayerCircle user={match.playerRed ? participants[match.playerRed] : undefined} color="#dc2626" x={75} y={100} />
+          <PlayerCircle user={match.playerBlue ? participants[match.playerBlue] : undefined} color="#2563eb" x={225} y={100} />
+        </>
+      ) : (
+        <>
+          <PlayerCircle user={match.redAttacker ? participants[match.redAttacker] : undefined} color="#dc2626" x={100} y={100} />
+          <PlayerCircle user={match.redDefender ? participants[match.redDefender] : undefined} color="#b91c1c" x={40} y={100} />
+          <PlayerCircle user={match.blueAttacker ? participants[match.blueAttacker] : undefined} color="#2563eb" x={200} y={100} />
+          <PlayerCircle user={match.blueDefender ? participants[match.blueDefender] : undefined} color="#1d4ed8" x={260} y={100} />
+        </>
       )}
     </svg>
   );

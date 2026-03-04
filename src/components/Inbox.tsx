@@ -1,150 +1,55 @@
-import { useState, useEffect, useRef } from "react";
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  updateDoc,
-  deleteDoc,
-  getDoc,
-  serverTimestamp,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useAuthStore } from "../stores/authStore";
-import type { Relationship, User } from "../types";
+import { useState, useEffect, useRef } from 'react';
+import { useFriendStore } from '../stores/friendStore.ts';
+import { useAuthStore } from '../stores/authStore.ts';
 
-export function Inbox() {
-  const { user } = useAuthStore();
-  const [pendingRequests, setPendingRequests] = useState<Relationship[]>([]);
-  const [senderUsers, setSenderUsers] = useState<Record<string, User>>({});
-  const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+export function Inbox(): React.ReactElement {
+  const [open, setOpen] = useState(false);
+  const { pendingIncoming, subscribeTo, acceptFriendRequest } = useFriendStore();
+  const user = useAuthStore((s) => s.user);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!user) return;
-
-    const q = query(
-      collection(db, "relationships"),
-      where("users", "array-contains", user.uid),
-      where("status", "==", "pending")
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const rels = snapshot.docs
-        .map((d) => ({ id: d.id, ...d.data() }) as Relationship)
-        .filter((r) => r.senderId !== user.uid);
-
-      setPendingRequests(rels);
-
-      // Fetch sender user data
-      const newSenderUsers: Record<string, User> = {};
-      for (const rel of rels) {
-        const senderUid = rel.senderId;
-        const userDoc = await getDoc(doc(db, "users", senderUid));
-        if (userDoc.exists()) {
-          newSenderUsers[senderUid] = { uid: userDoc.id, ...userDoc.data() } as User;
-        }
-      }
-      setSenderUsers(newSenderUsers);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
+    return subscribeTo(user.uid);
+  }, [user, subscribeTo]);
 
   useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+    function handleClick(e: MouseEvent): void {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const acceptRequest = async (rel: Relationship) => {
-    await updateDoc(doc(db, "relationships", rel.id), {
-      status: "accepted",
-      updatedAt: serverTimestamp(),
-    });
-  };
-
-  const declineRequest = async (rel: Relationship) => {
-    await deleteDoc(doc(db, "relationships", rel.id));
-  };
-
-  const count = pendingRequests.length;
-
   return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-400 hover:text-white transition-colors"
-        aria-label="Inbox"
-      >
-        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-          />
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(!open)} className="relative p-2">
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
         </svg>
-
-        {count > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
-            {count > 9 ? "9+" : count}
+        {pendingIncoming.length > 0 && (
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+            {pendingIncoming.length}
           </span>
         )}
       </button>
-
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-gray-800 rounded-lg shadow-xl border border-gray-700 z-50">
-          <div className="p-3 border-b border-gray-700">
-            <h3 className="font-semibold">Friend Requests</h3>
-          </div>
-
-          {count === 0 ? (
-            <div className="p-4 text-center text-gray-400">
-              No pending friend requests
-            </div>
+      {open && (
+        <div className="absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-lg border z-50 max-h-80 overflow-y-auto">
+          <div className="p-3 border-b font-semibold text-sm">Friend Requests</div>
+          {pendingIncoming.length === 0 ? (
+            <div className="p-4 text-sm text-gray-500 text-center">No pending requests</div>
           ) : (
-            <div className="max-h-80 overflow-y-auto">
-              {pendingRequests.map((rel) => {
-                const sender = senderUsers[rel.senderId];
-                return (
-                  <div key={rel.id} className="p-3 border-b border-gray-700 last:border-b-0">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                        {sender?.username.charAt(0).toUpperCase() || "?"}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium truncate">
-                          {sender?.username || "Someone"}
-                        </div>
-                        <div className="text-sm text-gray-400">
-                          wants to be friends · Elo: {sender?.elo ?? "-"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={() => acceptRequest(rel)}
-                        className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 rounded text-sm font-medium transition-colors"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => declineRequest(rel)}
-                        className="flex-1 py-1.5 bg-gray-600 hover:bg-gray-500 rounded text-sm font-medium transition-colors"
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            pendingIncoming.map((r) => (
+              <div key={r.id} className="flex items-center justify-between p-3 border-b">
+                <span className="text-sm">{r.senderId}</span>
+                <button
+                  onClick={() => acceptFriendRequest(r.id)}
+                  className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+                >
+                  Accept
+                </button>
+              </div>
+            ))
           )}
         </div>
       )}

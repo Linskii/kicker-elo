@@ -1,219 +1,52 @@
-import { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useAuthStore } from "./stores/authStore";
-import { Layout } from "./components/Layout";
-import { AuthForm } from "./components/AuthForm";
-import { HomePage } from "./pages/HomePage";
-import { LeaderboardPage } from "./pages/LeaderboardPage";
-import { ProfilePage } from "./pages/ProfilePage";
-import { FriendsPage } from "./pages/FriendsPage";
-import { MatchesPage } from "./pages/MatchesPage";
-import { NewMatchPage } from "./pages/NewMatchPage";
-import { MatchLobbyPage } from "./pages/MatchLobbyPage";
-import { LiveMatchPage } from "./pages/LiveMatchPage";
-import { MatchResultPage } from "./pages/MatchResultPage";
-import { EditMatchPage } from "./pages/EditMatchPage";
-import { SeasonsPage } from "./pages/SeasonsPage";
-import { SeasonDetailPage } from "./pages/SeasonDetailPage";
-import { AdminPage } from "./pages/AdminPage";
+import { useEffect } from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useAuthStore } from './stores/authStore.ts';
+import { Layout } from './components/Layout.tsx';
+import { ProtectedRoute } from './components/ProtectedRoute.tsx';
+import { AuthPage } from './pages/AuthPage.tsx';
+import { HomePage } from './pages/HomePage.tsx';
+import { LeaderboardPage } from './pages/LeaderboardPage.tsx';
+import { ProfilePage } from './pages/ProfilePage.tsx';
+import { FriendsPage } from './pages/FriendsPage.tsx';
+import { MatchesPage } from './pages/MatchesPage.tsx';
+import { NewMatchPage } from './pages/NewMatchPage.tsx';
+import { MatchLobbyPage } from './pages/MatchLobbyPage.tsx';
+import { LiveMatchPage } from './pages/LiveMatchPage.tsx';
+import { MatchResultPage } from './pages/MatchResultPage.tsx';
+import { EditMatchPage } from './pages/EditMatchPage.tsx';
+import { SeasonsPage } from './pages/SeasonsPage.tsx';
+import { SeasonDetailPage } from './pages/SeasonDetailPage.tsx';
+import { AdminPage } from './pages/AdminPage.tsx';
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuthStore();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-gray-400">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
-}
-
-function App() {
-  const { initialize, user, loading } = useAuthStore();
+export default function App(): React.ReactElement {
+  const initialize = useAuthStore((s) => s.initialize);
 
   useEffect(() => {
-    const unsubscribe = initialize();
-    return () => unsubscribe();
+    const unsub = initialize();
+    return unsub;
   }, [initialize]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-gray-400">Loading...</div>
-      </div>
-    );
-  }
 
   return (
     <BrowserRouter basename="/kicker-elo">
       <Routes>
-        <Route
-          path="/login"
-          element={
-            user ? (
-              <Navigate to="/" replace />
-            ) : (
-              <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-                <AuthForm />
-              </div>
-            )
-          }
-        />
-
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <HomePage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/leaderboard"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <LeaderboardPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <ProfilePage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/friends"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <FriendsPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/matches"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <MatchesPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/match/new"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <NewMatchPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/match/:matchId"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <MatchLobbyPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/match/:matchId/live"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <LiveMatchPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/match/:matchId/result"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <MatchResultPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/match/:matchId/edit"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <EditMatchPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/seasons"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <SeasonsPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/seasons/:seasonId"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <SeasonDetailPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute>
-              <Layout>
-                <AdminPage />
-              </Layout>
-            </ProtectedRoute>
-          }
-        />
-
+        <Route path="/login" element={<AuthPage />} />
+        <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+          <Route index element={<HomePage />} />
+          <Route path="leaderboard" element={<LeaderboardPage />} />
+          <Route path="profile" element={<ProfilePage />} />
+          <Route path="friends" element={<FriendsPage />} />
+          <Route path="matches" element={<MatchesPage />} />
+          <Route path="match/new" element={<NewMatchPage />} />
+          <Route path="match/:matchId" element={<MatchLobbyPage />} />
+          <Route path="match/:matchId/live" element={<LiveMatchPage />} />
+          <Route path="match/:matchId/result" element={<MatchResultPage />} />
+          <Route path="match/:matchId/edit" element={<EditMatchPage />} />
+          <Route path="seasons" element={<SeasonsPage />} />
+          <Route path="seasons/:seasonId" element={<SeasonDetailPage />} />
+          <Route path="admin" element={<ProtectedRoute adminOnly><AdminPage /></ProtectedRoute>} />
+        </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
 }
-
-export default App;

@@ -1,334 +1,221 @@
-import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import {
-  DndContext,
-  type DragEndEvent,
-  DragOverlay,
-  type DragStartEvent,
-  useDraggable,
-  useDroppable,
-  PointerSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
-import { useAuthStore } from "../stores/authStore";
-import { useMatchStore } from "../stores/matchStore";
-import type { User } from "../types";
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { DndContext, DragOverlay, useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { useAuthStore } from '../stores/authStore.ts';
+import { useMatchStore } from '../stores/matchStore.ts';
+import { FieldView } from '../components/FieldView.tsx';
+import { computeTeamElo } from '../utils/elo.ts';
+import type { TeamSlot, User } from '../types/index.ts';
 
-function PlayerCard({
-  player,
-  isDragging,
-}: {
-  player: User;
-  isDragging?: boolean;
-}) {
-  return (
-    <div
-      className={`flex items-center gap-2 bg-gray-600 p-2 rounded-lg ${
-        isDragging ? "opacity-50" : ""
-      }`}
-    >
-      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
-        {player.username.charAt(0).toUpperCase()}
-      </div>
-      <div>
-        <div className="text-sm font-medium">{player.username}</div>
-        <div className="text-xs text-gray-400">Elo: {player.elo}</div>
-      </div>
-    </div>
-  );
-}
-
-function DraggablePlayer({ player }: { player: User }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: player.uid,
-    data: player,
-  });
-
+function DraggablePlayer({ uid, username, isAssigned }: { uid: string; username: string; isAssigned: boolean }): React.ReactElement {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: uid });
   return (
     <div
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className="cursor-grab touch-none"
+      className={`px-3 py-2 rounded-lg text-sm font-medium cursor-grab select-none ${
+        isAssigned ? 'bg-gray-200 text-gray-500' : 'bg-blue-100 text-blue-700'
+      } ${isDragging ? 'opacity-50' : ''}`}
     >
-      <PlayerCard player={player} isDragging={isDragging} />
+      {username}
     </div>
   );
 }
 
-function DroppableSlot({
-  id,
-  label,
-  player,
-  color,
-}: {
-  id: string;
-  label: string;
-  player: User | null;
-  color: "red" | "blue";
-}) {
-  const { isOver, setNodeRef } = useDroppable({ id });
-
-  const bgColor = color === "red" ? "bg-red-900/30" : "bg-blue-900/30";
-  const borderColor =
-    color === "red"
-      ? isOver
-        ? "border-red-400"
-        : "border-red-600"
-      : isOver
-        ? "border-blue-400"
-        : "border-blue-600";
-
+function DroppableSlot({ id, label, player, color }: { id: string; label: string; player: User | null; color: string }): React.ReactElement {
+  const { setNodeRef, isOver } = useDroppable({ id });
   return (
     <div
       ref={setNodeRef}
-      className={`${bgColor} border-2 ${borderColor} border-dashed rounded-lg p-3 min-h-[70px] transition-colors`}
+      className={`border-2 border-dashed rounded-lg p-3 text-center min-h-[60px] flex flex-col items-center justify-center ${
+        isOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300'
+      }`}
     >
-      <div
-        className={`text-xs font-medium mb-2 ${color === "red" ? "text-red-400" : "text-blue-400"}`}
-      >
-        {label}
-      </div>
+      <div className={`text-xs font-medium mb-1 ${color}`}>{label}</div>
       {player ? (
-        <DraggablePlayer player={player} />
+        <div className="text-sm font-bold">{player.username}</div>
       ) : (
-        <div className="text-gray-500 text-sm text-center py-2">
-          Drop player here
-        </div>
+        <div className="text-xs text-gray-400">Drop here</div>
       )}
     </div>
   );
 }
 
-export function MatchLobbyPage() {
+function computeSuggestions(participants: Record<string, User>): { balanced: [string[], string[]]; lopsided: [string[], string[]] } | null {
+  const uids = Object.keys(participants);
+  if (uids.length !== 4) return null;
+
+  const teamElos: Record<string, number> = {};
+  for (const uid of uids) {
+    const u = participants[uid];
+    teamElos[uid] = computeTeamElo(u.attackElo, u.defenseElo, null) ?? 1000;
+  }
+
+  const splits: [string[], string[]][] = [
+    [[uids[0], uids[1]], [uids[2], uids[3]]],
+    [[uids[0], uids[2]], [uids[1], uids[3]]],
+    [[uids[0], uids[3]], [uids[1], uids[2]]],
+  ];
+
+  const scored = splits.map((split) => {
+    const avg1 = (teamElos[split[0][0]] + teamElos[split[0][1]]) / 2;
+    const avg2 = (teamElos[split[1][0]] + teamElos[split[1][1]]) / 2;
+    return { split, diff: Math.abs(avg1 - avg2) };
+  });
+
+  scored.sort((a, b) => a.diff - b.diff);
+  return { balanced: scored[0].split, lopsided: scored[scored.length - 1].split };
+}
+
+export function MatchLobbyPage(): React.ReactElement {
   const { matchId } = useParams<{ matchId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const {
-    currentMatch,
-    participants,
-    loading,
-    subscribeToMatch,
-    assignToTeam,
-    startMatch,
-    joinLobby,
-    leaveLobby,
-  } = useMatchStore();
-
+  const user = useAuthStore((s) => s.user);
+  const { match, participants, subscribeToMatch, assignToTeam, startMatch, deleteMatch, removePlayer } = useMatchStore();
   const [activeId, setActiveId] = useState<string | null>(null);
-  const userRef = useRef(user);
-
-  // PointerSensor handles both mouse and touch uniformly
-  const pointerSensor = useSensor(PointerSensor, {
-    activationConstraint: {
-      distance: 8, // 8px movement required before drag starts
-    },
-  });
-  const sensors = useSensors(pointerSensor);
-  userRef.current = user;
 
   useEffect(() => {
-    if (!matchId || !user) return;
-    const unsubscribe = subscribeToMatch(matchId);
-    joinLobby(matchId, user.uid);
-
-    return () => {
-      unsubscribe();
-      if (userRef.current) {
-        leaveLobby(matchId, userRef.current.uid);
-      }
-    };
-  }, [matchId, user?.uid, subscribeToMatch, joinLobby, leaveLobby]);
+    if (!matchId) return;
+    return subscribeToMatch(matchId);
+  }, [matchId, subscribeToMatch]);
 
   useEffect(() => {
-    if (!matchId || loading) return;
-    if (currentMatch === null) {
-      // Match was deleted (last viewer left)
-      navigate("/matches");
-      return;
-    }
-    // Ignore stale data from a previous subscription (e.g. coming from result page)
-    if (currentMatch.id !== matchId) return;
-    if (currentMatch.status === "live") {
-      navigate(`/match/${matchId}/live`);
-    } else if (currentMatch.status === "completed") {
-      navigate(`/match/${matchId}/result`);
-    }
-  }, [currentMatch, loading, matchId, navigate]);
+    if (match?.status === 'live') navigate(`/match/${matchId}/live`, { replace: true });
+  }, [match?.status, matchId, navigate]);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Loading match...</div>
-      </div>
-    );
+  if (!match || !user || !matchId) return <div className="p-4">Loading...</div>;
+
+  const isSolo = match.participants.length <= 2;
+  const isCreator = match.createdBy === user.uid;
+
+  const slotsConfig: { id: TeamSlot; label: string; color: string }[] = isSolo
+    ? [
+        { id: 'playerRed', label: 'Red', color: 'text-red-600' },
+        { id: 'playerBlue', label: 'Blue', color: 'text-blue-600' },
+      ]
+    : [
+        { id: 'redAttacker', label: 'Red Attacker', color: 'text-red-600' },
+        { id: 'redDefender', label: 'Red Defender', color: 'text-red-700' },
+        { id: 'blueAttacker', label: 'Blue Attacker', color: 'text-blue-600' },
+        { id: 'blueDefender', label: 'Blue Defender', color: 'text-blue-700' },
+      ];
+
+  function getSlotPlayer(slot: TeamSlot): User | null {
+    const uid = match![slot] as string | null;
+    return uid ? participants[uid] ?? null : null;
   }
 
-  if (!currentMatch || !user) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Match not found</div>
-      </div>
-    );
+  function isAssigned(uid: string): boolean {
+    const m = match!;
+    return [m.redAttacker, m.redDefender, m.blueAttacker, m.blueDefender, m.playerRed, m.playerBlue].includes(uid);
   }
 
-  const isCreator = currentMatch.createdBy === user.uid;
+  const allSlotsFilled = slotsConfig.every((s) => match[s.id] !== null);
 
-  // Get players not assigned to any team
-  const assignedPlayers = [
-    currentMatch.redTeam.attacker,
-    currentMatch.redTeam.defender,
-    currentMatch.blueTeam.attacker,
-    currentMatch.blueTeam.defender,
-  ].filter(Boolean);
+  function handleDragStart(e: DragStartEvent): void {
+    setActiveId(e.active.id as string);
+  }
 
-  const unassignedPlayers = currentMatch.participants.filter(
-    (uid) => !assignedPlayers.includes(uid)
-  );
-
-  const handleDragStart = (event: DragStartEvent) => {
-    setActiveId(event.active.id as string);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
+  function handleDragEnd(e: DragEndEvent): void {
     setActiveId(null);
+    if (!e.over) return;
+    const playerUid = e.active.id as string;
+    const slot = e.over.id as TeamSlot;
+    assignToTeam(matchId!, playerUid, slot);
+  }
 
-    const { active, over } = event;
-    if (!over || !matchId) return;
+  function applySuggestion(teams: [string[], string[]]): void {
+    const [team1, team2] = teams;
+    const p = participants;
+    // Team1 = red, Team2 = blue
+    // Higher attackElo → attacker
+    const redAtk = p[team1[0]]?.attackElo >= (p[team1[1]]?.attackElo ?? 0) ? team1[0] : team1[1];
+    const redDef = redAtk === team1[0] ? team1[1] : team1[0];
+    const blueAtk = p[team2[0]]?.attackElo >= (p[team2[1]]?.attackElo ?? 0) ? team2[0] : team2[1];
+    const blueDef = blueAtk === team2[0] ? team2[1] : team2[0];
+    assignToTeam(matchId!, redAtk, 'redAttacker');
+    assignToTeam(matchId!, redDef, 'redDefender');
+    assignToTeam(matchId!, blueAtk, 'blueAttacker');
+    assignToTeam(matchId!, blueDef, 'blueDefender');
+  }
 
-    const playerUid = active.id as string;
-    const [team, role] = (over.id as string).split("-") as [
-      "red" | "blue",
-      "attacker" | "defender",
-    ];
-
-    assignToTeam(matchId, playerUid, team, role);
-  };
-
-  const canStartMatch = () => {
-    const redPlayers = [
-      currentMatch.redTeam.attacker,
-      currentMatch.redTeam.defender,
-    ].filter(Boolean).length;
-    const bluePlayers = [
-      currentMatch.blueTeam.attacker,
-      currentMatch.blueTeam.defender,
-    ].filter(Boolean).length;
-
-    // Valid configs: 1v1, 1v2, 2v1, 2v2
-    return redPlayers >= 1 && bluePlayers >= 1;
-  };
-
-  const handleStartMatch = () => {
-    if (matchId && canStartMatch()) {
-      startMatch(matchId);
-    }
-  };
-
+  const suggestions = !isSolo ? computeSuggestions(participants) : null;
   const activePlayer = activeId ? participants[activeId] : null;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">Match Lobby</h1>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">{isSolo ? 'Solo' : 'Team'} Match Lobby</h1>
+        {isCreator && (
+          <button onClick={() => { deleteMatch(matchId); navigate('/matches'); }} className="text-sm text-red-600 hover:text-red-800">
+            Delete Lobby
+          </button>
+        )}
+      </div>
 
-      <DndContext
-        sensors={sensors}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-      >
-        {/* Unassigned Players Pool */}
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h2 className="font-semibold mb-3">
-            Players ({currentMatch.participants.length})
-          </h2>
-          {unassignedPlayers.length === 0 ? (
-            <div className="text-gray-500 text-sm text-center py-4">
-              All players assigned to teams
-            </div>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {unassignedPlayers.map((uid) => {
-                const player = participants[uid];
-                if (!player) return null;
-                return <DraggablePlayer key={uid} player={player} />;
-              })}
-            </div>
-          )}
+      {!isCreator && (
+        <button onClick={() => { removePlayer(matchId, user.uid); navigate('/matches'); }} className="text-sm text-gray-600 hover:text-gray-800">
+          Leave Lobby
+        </button>
+      )}
+
+      <FieldView match={match} participants={participants} />
+
+      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        {/* Player pool */}
+        <div className="flex flex-wrap gap-2">
+          {match.participants.map((uid) => {
+            const p = participants[uid];
+            if (!p) return null;
+            return <DraggablePlayer key={uid} uid={uid} username={p.username} isAssigned={isAssigned(uid)} />;
+          })}
         </div>
 
-        {/* Teams */}
-        <div className="grid sm:grid-cols-2 gap-4">
-          {/* Red Team */}
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h2 className="font-semibold mb-3 text-red-400">Red Team</h2>
-            <div className="space-y-3">
-              <DroppableSlot
-                id="red-attacker"
-                label="Attacker"
-                player={
-                  currentMatch.redTeam.attacker
-                    ? participants[currentMatch.redTeam.attacker]
-                    : null
-                }
-                color="red"
-              />
-              <DroppableSlot
-                id="red-defender"
-                label="Defender"
-                player={
-                  currentMatch.redTeam.defender
-                    ? participants[currentMatch.redTeam.defender]
-                    : null
-                }
-                color="red"
-              />
-            </div>
-          </div>
-
-          {/* Blue Team */}
-          <div className="bg-gray-800 rounded-lg p-4">
-            <h2 className="font-semibold mb-3 text-blue-400">Blue Team</h2>
-            <div className="space-y-3">
-              <DroppableSlot
-                id="blue-attacker"
-                label="Attacker"
-                player={
-                  currentMatch.blueTeam.attacker
-                    ? participants[currentMatch.blueTeam.attacker]
-                    : null
-                }
-                color="blue"
-              />
-              <DroppableSlot
-                id="blue-defender"
-                label="Defender"
-                player={
-                  currentMatch.blueTeam.defender
-                    ? participants[currentMatch.blueTeam.defender]
-                    : null
-                }
-                color="blue"
-              />
-            </div>
-          </div>
+        {/* Slots */}
+        <div className={`grid gap-3 ${isSolo ? 'grid-cols-2' : 'grid-cols-2'}`}>
+          {slotsConfig.map((slot) => (
+            <DroppableSlot key={slot.id} id={slot.id} label={slot.label} player={getSlotPlayer(slot.id)} color={slot.color} />
+          ))}
         </div>
 
         <DragOverlay>
-          {activePlayer ? <PlayerCard player={activePlayer} /> : null}
+          {activePlayer ? (
+            <div className="px-3 py-2 rounded-lg text-sm font-medium bg-blue-200 text-blue-800 shadow-lg">
+              {activePlayer.username}
+            </div>
+          ) : null}
         </DragOverlay>
       </DndContext>
 
-      {/* Start Match Button */}
-      {isCreator && (
-        <button
-          onClick={handleStartMatch}
-          disabled={!canStartMatch()}
-          className="w-full py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium"
-        >
-          {canStartMatch() ? "Start Match" : "Assign at least 1 player per team"}
-        </button>
+      {/* Team Suggestions */}
+      {suggestions && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-gray-500">Suggest Teams</h3>
+          <div className="flex gap-2">
+            <button
+              onClick={() => applySuggestion(suggestions.balanced)}
+              className="flex-1 py-2 bg-green-50 text-green-700 rounded-lg text-sm font-medium hover:bg-green-100"
+            >
+              Most Balanced
+            </button>
+            <button
+              onClick={() => applySuggestion(suggestions.lopsided)}
+              className="flex-1 py-2 bg-orange-50 text-orange-700 rounded-lg text-sm font-medium hover:bg-orange-100"
+            >
+              Most Lopsided
+            </button>
+          </div>
+        </div>
       )}
+
+      <button
+        onClick={() => startMatch(matchId)}
+        disabled={!allSlotsFilled}
+        className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+      >
+        Start Match
+      </button>
     </div>
   );
 }

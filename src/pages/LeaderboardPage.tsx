@@ -1,219 +1,132 @@
-import { useEffect, useState } from "react";
-import {
-  collection,
-  query,
-  orderBy,
-  limit,
-  getDocs,
-  where,
-  setDoc,
-  doc,
-  serverTimestamp,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
-import type { User, Relationship } from "../types";
-import { useAuthStore } from "../stores/authStore";
-import { PlayerProfilePopup } from "../components/PlayerProfilePopup";
+import { useEffect, useState } from 'react';
+import { collection, query, where, getDocs, orderBy, limit, doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import { computeTeamElo } from '../utils/elo.ts';
+import { Inbox } from '../components/Inbox.tsx';
+import { PlayerProfilePopup } from '../components/PlayerProfilePopup.tsx';
+import type { User, UserSeasonStats } from '../types/index.ts';
+import { useSeasonStore } from '../stores/seasonStore.ts';
 
-export function LeaderboardPage() {
-  const [players, setPlayers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedPlayerUid, setSelectedPlayerUid] = useState<string | null>(null);
-  const [relationships, setRelationships] = useState<Relationship[]>([]);
-  const { user: currentUser } = useAuthStore();
+type Tab = 'team' | 'solo';
 
-  useEffect(() => {
-    const fetchLeaderboard = async () => {
-      const q = query(
-        collection(db, "users"),
-        orderBy("elo", "desc"),
-        limit(50)
-      );
-      const snapshot = await getDocs(q);
-      const users = snapshot.docs.map(
-        (doc) => ({ uid: doc.id, ...doc.data() }) as User
-      );
-      setPlayers(users);
-      setLoading(false);
-    };
+interface LeaderboardEntry {
+  uid: string;
+  username: string;
+  attackElo: number;
+  defenseElo: number;
+  soloElo: number;
+  teamElo: number;
+  wins: number;
+  losses: number;
+}
 
-    fetchLeaderboard();
-  }, []);
+export function LeaderboardPage(): React.ReactElement {
+  const [tab, setTab] = useState<Tab>('team');
+  const [teamEntries, setTeamEntries] = useState<LeaderboardEntry[]>([]);
+  const [soloEntries, setSoloEntries] = useState<LeaderboardEntry[]>([]);
+  const [selectedUid, setSelectedUid] = useState<string | null>(null);
+  const config = useSeasonStore((s) => s.currentSeasonConfig);
+  const fetchConfig = useSeasonStore((s) => s.fetchCurrentSeasonConfig);
+
+  useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
   useEffect(() => {
-    if (!currentUser) return;
-    const fetchRelationships = async () => {
-      const q = query(
-        collection(db, "relationships"),
-        where("users", "array-contains", currentUser.uid)
-      );
-      const snapshot = await getDocs(q);
-      setRelationships(
-        snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as Relationship)
-      );
-    };
-    fetchRelationships();
-  }, [currentUser]);
+    if (!config) return;
+    async function loadTeam(): Promise<void> {
+      const q = query(collection(db, 'users'), where('teamRanked', '==', true));
+      const snap = await getDocs(q);
+      const entries: LeaderboardEntry[] = [];
+      for (const d of snap.docs) {
+        const u = d.data() as User;
+        const statsSnap = await getDoc(doc(db, 'users', d.id, 'seasonStats', config!.currentSeasonId));
+        const stats = statsSnap.exists() ? (statsSnap.data() as UserSeasonStats) : null;
+        const tElo = computeTeamElo(u.attackElo, u.defenseElo, stats);
+        if (tElo !== null) {
+          entries.push({
+            uid: d.id, username: u.username,
+            attackElo: u.attackElo, defenseElo: u.defenseElo,
+            soloElo: u.soloElo, teamElo: tElo,
+            wins: u.wins, losses: u.losses,
+          });
+        }
+      }
+      entries.sort((a, b) => b.teamElo - a.teamElo);
+      setTeamEntries(entries.slice(0, 50));
+    }
+    async function loadSolo(): Promise<void> {
+      const q = query(collection(db, 'users'), where('soloRanked', '==', true), orderBy('soloElo', 'desc'), limit(50));
+      const snap = await getDocs(q);
+      setSoloEntries(snap.docs.map((d) => {
+        const u = d.data() as User;
+        return {
+          uid: d.id, username: u.username,
+          attackElo: u.attackElo, defenseElo: u.defenseElo,
+          soloElo: u.soloElo, teamElo: 0,
+          wins: u.wins, losses: u.losses,
+        };
+      }));
+    }
+    loadTeam();
+    loadSolo();
+  }, [config]);
 
-  const sendFriendRequest = async (friendUid: string) => {
-    if (!currentUser) return;
-    const ids = [currentUser.uid, friendUid].sort();
-    const relationshipId = `${ids[0]}_${ids[1]}`;
-    await setDoc(doc(db, "relationships", relationshipId), {
-      users: ids,
-      status: "pending",
-      senderId: currentUser.uid,
-      updatedAt: serverTimestamp(),
-    });
-    setRelationships((prev) => [
-      ...prev,
-      {
-        id: relationshipId,
-        users: ids as [string, string],
-        status: "pending",
-        senderId: currentUser.uid,
-        updatedAt: null as never,
-      },
-    ]);
-  };
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Loading leaderboard...</div>
-      </div>
-    );
-  }
+  const entries = tab === 'team' ? teamEntries : soloEntries;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Leaderboard</h1>
-
-      <div className="bg-gray-800 rounded-lg overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-700">
-            <tr>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">
-                Rank
-              </th>
-              <th className="px-4 py-3 text-left text-sm font-medium text-gray-300">
-                Player
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-300">
-                Elo
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-300 hidden sm:table-cell">
-                W/L
-              </th>
-              <th className="px-4 py-3 text-right text-sm font-medium text-gray-300 hidden sm:table-cell">
-                Win Rate
-              </th>
-              {currentUser && (
-                <th className="px-4 py-3 text-right text-sm font-medium text-gray-300"></th>
-              )}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-700">
-            {players.map((player, index) => {
-              const winRate =
-                player.matchesPlayed > 0
-                  ? Math.round((player.wins / player.matchesPlayed) * 100)
-                  : 0;
-              const isCurrentUser = player.uid === currentUser?.uid;
-
-              return (
-                <tr
-                  key={player.uid}
-                  onClick={() => !isCurrentUser && setSelectedPlayerUid(player.uid)}
-                  className={`${isCurrentUser ? "bg-blue-900/30" : "hover:bg-gray-700/50 cursor-pointer"}`}
-                >
-                  <td className="px-4 py-3">
-                    <span
-                      className={`${
-                        index === 0
-                          ? "text-yellow-400"
-                          : index === 1
-                            ? "text-gray-300"
-                            : index === 2
-                              ? "text-amber-600"
-                              : "text-gray-400"
-                      } font-medium`}
-                    >
-                      #{index + 1}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm font-medium">
-                        {player.username.charAt(0).toUpperCase()}
-                      </div>
-                      <span className={isCurrentUser ? "font-semibold" : ""}>
-                        {player.username}
-                        {isCurrentUser && (
-                          <span className="text-xs text-gray-400 ml-2">
-                            (you)
-                          </span>
-                        )}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <span className="font-mono font-semibold text-blue-400">
-                      {player.elo}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right hidden sm:table-cell">
-                    <span className="text-green-400">{player.wins}</span>
-                    <span className="text-gray-500">/</span>
-                    <span className="text-red-400">{player.losses}</span>
-                  </td>
-                  <td className="px-4 py-3 text-right hidden sm:table-cell">
-                    <span className="text-gray-300">{winRate}%</span>
-                  </td>
-                  {currentUser && !isCurrentUser && (() => {
-                    const rel = relationships.find((r) =>
-                      r.users.includes(player.uid)
-                    );
-                    return (
-                      <td className="px-4 py-3 text-right">
-                        {rel ? (
-                          <span className="text-xs text-gray-500">
-                            {rel.status === "pending" ? "Pending" : "Friends"}
-                          </span>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              sendFriendRequest(player.uid);
-                            }}
-                            className="px-2 py-1 bg-blue-600 hover:bg-blue-700 rounded text-xs whitespace-nowrap"
-                          >
-                            + Add
-                          </button>
-                        )}
-                      </td>
-                    );
-                  })()}
-                  {currentUser && isCurrentUser && <td />}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {players.length === 0 && (
-          <div className="px-4 py-8 text-center text-gray-400">
-            No players yet. Be the first to play!
-          </div>
-        )}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Leaderboard</h1>
+        <div className="md:hidden"><Inbox /></div>
       </div>
 
-      {selectedPlayerUid && (
-        <PlayerProfilePopup
-          playerUid={selectedPlayerUid}
-          onClose={() => setSelectedPlayerUid(null)}
-        />
-      )}
+      <div className="flex gap-2">
+        <button onClick={() => setTab('team')} className={`px-4 py-2 rounded text-sm font-medium ${tab === 'team' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>Team</button>
+        <button onClick={() => setTab('solo')} className={`px-4 py-2 rounded text-sm font-medium ${tab === 'solo' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`}>Solo</button>
+      </div>
+
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-left">
+            <tr>
+              <th className="px-4 py-2">#</th>
+              <th className="px-4 py-2">Player</th>
+              {tab === 'team' ? (
+                <>
+                  <th className="px-4 py-2">Team</th>
+                  <th className="px-4 py-2 hidden sm:table-cell">Atk</th>
+                  <th className="px-4 py-2 hidden sm:table-cell">Def</th>
+                </>
+              ) : (
+                <th className="px-4 py-2">Solo</th>
+              )}
+              <th className="px-4 py-2">W/L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry, i) => (
+              <tr key={entry.uid} className="border-t hover:bg-gray-50 cursor-pointer" onClick={() => setSelectedUid(entry.uid)}>
+                <td className="px-4 py-2 font-medium">{i + 1}</td>
+                <td className="px-4 py-2">{entry.username}</td>
+                {tab === 'team' ? (
+                  <>
+                    <td className="px-4 py-2 font-bold">{entry.teamElo}</td>
+                    <td className="px-4 py-2 hidden sm:table-cell">{entry.attackElo}</td>
+                    <td className="px-4 py-2 hidden sm:table-cell">{entry.defenseElo}</td>
+                  </>
+                ) : (
+                  <td className="px-4 py-2 font-bold">{entry.soloElo}</td>
+                )}
+                <td className="px-4 py-2">{entry.wins}/{entry.losses}</td>
+              </tr>
+            ))}
+            {entries.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No ranked players yet</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedUid && <PlayerProfilePopup uid={selectedUid} onClose={() => setSelectedUid(null)} />}
     </div>
   );
 }

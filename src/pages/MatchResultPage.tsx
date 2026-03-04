@@ -1,231 +1,132 @@
-import { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { useAuthStore } from "../stores/authStore";
-import { useMatchStore } from "../stores/matchStore";
-import { FieldView } from "../components/FieldView";
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import { useMatchStore } from '../stores/matchStore.ts';
+import { useAuthStore } from '../stores/authStore.ts';
+import type { UserSeasonStats } from '../types/index.ts';
+import { ELO_CONFIG } from '../utils/elo.ts';
 
-export function MatchResultPage() {
+export function MatchResultPage(): React.ReactElement {
   const { matchId } = useParams<{ matchId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const { currentMatch, participants, loading, subscribeToMatch, createRematch } =
-    useMatchStore();
-  const [now] = useState(() => Date.now());
-  const [rematching, setRematching] = useState(false);
-
-  const handleRematch = async () => {
-    if (!user) return;
-    setRematching(true);
-    try {
-      const newMatchId = await createRematch(user.uid);
-      navigate(`/match/${newMatchId}`);
-    } catch (error) {
-      console.error("Error creating rematch:", error);
-      setRematching(false);
-    }
-  };
+  const user = useAuthStore((s) => s.user);
+  const { match, participants, subscribeToMatch, createRematch } = useMatchStore();
+  const [seasonStats, setSeasonStats] = useState<Record<string, UserSeasonStats | null>>({});
+  const [timeLeft, setTimeLeft] = useState(0);
 
   useEffect(() => {
     if (!matchId) return;
-    const unsubscribe = subscribeToMatch(matchId);
-    return () => unsubscribe();
+    return subscribeToMatch(matchId);
   }, [matchId, subscribeToMatch]);
 
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Loading result...</div>
-      </div>
-    );
+  useEffect(() => {
+    if (!match?.seasonId) return;
+    async function loadStats(): Promise<void> {
+      const stats: Record<string, UserSeasonStats | null> = {};
+      for (const uid of match!.participants) {
+        const snap = await getDoc(doc(db, 'users', uid, 'seasonStats', match!.seasonId!));
+        stats[uid] = snap.exists() ? (snap.data() as UserSeasonStats) : null;
+      }
+      setSeasonStats(stats);
+    }
+    loadStats();
+  }, [match]);
+
+  useEffect(() => {
+    if (!match?.endedAt) return;
+    const interval = setInterval(() => {
+      const elapsed = Timestamp.now().toMillis() - match.endedAt!.toMillis();
+      const remaining = Math.max(0, 10 * 60 * 1000 - elapsed);
+      setTimeLeft(remaining);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [match?.endedAt]);
+
+  if (!match || !user || !matchId) return <div className="p-4">Loading...</div>;
+
+  const redWon = match.redScore > match.blueScore;
+
+  function formatPlayerChange(uid: string): React.ReactElement {
+    const changes = match!.eloChanges?.[uid];
+    if (!changes) return <span>-</span>;
+
+    const stats = seasonStats[uid];
+    const req = ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
+
+    if (match!.type === 'solo') {
+      const isPlacement = (stats?.soloMatchesPlayed ?? 0) < req;
+      if (isPlacement) return <span className="text-yellow-600 text-sm">Placement</span>;
+      const d = Math.round(changes.soloEloDelta);
+      return <span className={d >= 0 ? 'text-green-600' : 'text-red-600'}>{d >= 0 ? '+' : ''}{d}</span>;
+    }
+
+    const isAttacker = match!.redAttacker === uid || match!.blueAttacker === uid;
+    if (isAttacker) {
+      const isPlacement = (stats?.attackMatchesPlayed ?? 0) < req;
+      if (isPlacement) return <span className="text-yellow-600 text-sm">Placement</span>;
+      const d = Math.round(changes.attackEloDelta);
+      return <span className={d >= 0 ? 'text-green-600' : 'text-red-600'}>{d >= 0 ? '+' : ''}{d}</span>;
+    }
+    const isPlacement = (stats?.defenseMatchesPlayed ?? 0) < req;
+    if (isPlacement) return <span className="text-yellow-600 text-sm">Placement</span>;
+    const d = Math.round(changes.defenseEloDelta);
+    return <span className={d >= 0 ? 'text-green-600' : 'text-red-600'}>{d >= 0 ? '+' : ''}{d}</span>;
   }
 
-  if (!currentMatch || !user) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Match not found</div>
-      </div>
-    );
+  async function handleRematch(): Promise<void> {
+    const newId = await createRematch(matchId!);
+    navigate(`/match/${newId}`);
   }
-  const endedAtMs = currentMatch.endedAt?.toMillis() ?? 0;
-  const isEditable = endedAtMs > 0 && now - endedAtMs < 10 * 60 * 1000;
 
-  const redWon = currentMatch.redTeam.score > currentMatch.blueTeam.score;
-  const isUserRed =
-    currentMatch.redTeam.attacker === user.uid ||
-    currentMatch.redTeam.defender === user.uid;
-  const userWon = isUserRed ? redWon : !redWon;
-  const userEloChange = currentMatch.eloChanges?.[user.uid] || 0;
-
-  const getPlayerResult = (uid: string) => {
-    const player = participants[uid];
-    const eloChange = currentMatch.eloChanges?.[uid] || 0;
-    return { player, eloChange };
-  };
+  const canEdit = timeLeft > 0;
+  const minutes = Math.floor(timeLeft / 60000);
+  const seconds = Math.floor((timeLeft % 60000) / 1000);
 
   return (
-    <div className="max-w-lg mx-auto space-y-6">
-      {/* Result Header */}
-      <div className="text-center">
-        <div
-          className={`text-4xl font-bold mb-2 ${
-            userWon ? "text-green-400" : "text-red-400"
-          }`}
-        >
-          {userWon ? "Victory!" : "Defeat"}
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-center">Match Result</h1>
+
+      <div className="flex items-center justify-center gap-8">
+        <div className="text-center">
+          <div className={`text-5xl font-bold ${redWon ? 'text-red-600' : 'text-red-300'}`}>{match.redScore}</div>
+          <div className="text-sm text-gray-500">Red {redWon ? '(Winner)' : ''}</div>
         </div>
-        <div
-          className={`text-2xl font-mono ${
-            userEloChange >= 0 ? "text-green-400" : "text-red-400"
-          }`}
-        >
-          {userEloChange >= 0 ? "+" : ""}
-          {userEloChange} Elo
+        <div className="text-xl text-gray-300">-</div>
+        <div className="text-center">
+          <div className={`text-5xl font-bold ${!redWon ? 'text-blue-600' : 'text-blue-300'}`}>{match.blueScore}</div>
+          <div className="text-sm text-gray-500">Blue {!redWon ? '(Winner)' : ''}</div>
         </div>
       </div>
 
-      {/* Final Score */}
-      <div className="bg-gray-800 rounded-lg p-6">
-        <div className="flex items-center justify-center gap-8">
-          <div
-            className={`text-center ${redWon ? "opacity-100" : "opacity-60"}`}
-          >
-            <div className="text-red-400 text-lg font-medium mb-1">
-              Red {redWon && "🏆"}
+      <div className="bg-white rounded-lg shadow divide-y">
+        {match.participants.map((uid) => {
+          const p = participants[uid];
+          if (!p) return null;
+          return (
+            <div key={uid} className="flex items-center justify-between p-3">
+              <span className="text-sm font-medium">{p.username}</span>
+              <span className="text-sm font-bold">{formatPlayerChange(uid)}</span>
             </div>
-            <div className="text-5xl font-bold">
-              {currentMatch.redTeam.score}
-            </div>
-          </div>
-          <div className="text-2xl text-gray-500">-</div>
-          <div
-            className={`text-center ${!redWon ? "opacity-100" : "opacity-60"}`}
-          >
-            <div className="text-blue-400 text-lg font-medium mb-1">
-              {!redWon && "🏆"} Blue
-            </div>
-            <div className="text-5xl font-bold">
-              {currentMatch.blueTeam.score}
-            </div>
-          </div>
-        </div>
+          );
+        })}
       </div>
 
-      {/* Field visualization */}
-      <FieldView
-        redTeam={{
-          attacker: currentMatch.redTeam.attacker ? participants[currentMatch.redTeam.attacker] : null,
-          defender: currentMatch.redTeam.defender ? participants[currentMatch.redTeam.defender] : null,
-        }}
-        blueTeam={{
-          attacker: currentMatch.blueTeam.attacker ? participants[currentMatch.blueTeam.attacker] : null,
-          defender: currentMatch.blueTeam.defender ? participants[currentMatch.blueTeam.defender] : null,
-        }}
-      />
-
-      {/* Player Results */}
-      <div className="grid sm:grid-cols-2 gap-4">
-        {/* Red Team */}
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h3 className="text-red-400 font-semibold mb-3">Red Team</h3>
-          <div className="space-y-3">
-            {currentMatch.redTeam.attacker && (
-              <PlayerResultRow
-                {...getPlayerResult(currentMatch.redTeam.attacker)}
-                role="ATK"
-              />
-            )}
-            {currentMatch.redTeam.defender && (
-              <PlayerResultRow
-                {...getPlayerResult(currentMatch.redTeam.defender)}
-                role="DEF"
-              />
-            )}
-          </div>
-        </div>
-
-        {/* Blue Team */}
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h3 className="text-blue-400 font-semibold mb-3">Blue Team</h3>
-          <div className="space-y-3">
-            {currentMatch.blueTeam.attacker && (
-              <PlayerResultRow
-                {...getPlayerResult(currentMatch.blueTeam.attacker)}
-                role="ATK"
-              />
-            )}
-            {currentMatch.blueTeam.defender && (
-              <PlayerResultRow
-                {...getPlayerResult(currentMatch.blueTeam.defender)}
-                role="DEF"
-              />
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Actions */}
-      <div className="flex gap-3 flex-wrap">
-        <Link
-          to="/matches"
-          className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg text-center font-medium"
-        >
-          Match History
-        </Link>
-        {isEditable && (
-          <Link
-            to={`/match/${matchId}/edit`}
-            className="flex-1 py-3 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-center font-medium"
-          >
-            Edit Result
-          </Link>
-        )}
+      <div className="flex gap-3">
         <button
           onClick={handleRematch}
-          disabled={rematching}
-          className="flex-1 py-3 bg-green-600 hover:bg-green-700 disabled:bg-green-800 rounded-lg font-medium"
+          className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
         >
-          {rematching ? "Creating..." : "Rematch"}
+          Rematch
         </button>
-        <Link
-          to="/match/new"
-          className="flex-1 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-center font-medium"
-        >
-          New Match
-        </Link>
-      </div>
-    </div>
-  );
-}
-
-function PlayerResultRow({
-  player,
-  eloChange,
-  role,
-}: {
-  player: { username: string; elo: number } | undefined;
-  eloChange: number;
-  role: string;
-}) {
-  if (!player) return null;
-
-  return (
-    <div className="flex items-center justify-between bg-gray-700 p-2 rounded">
-      <div className="flex items-center gap-2">
-        <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-          {player.username.charAt(0).toUpperCase()}
-        </div>
-        <div>
-          <div className="text-sm font-medium">{player.username}</div>
-          <div className="text-xs text-gray-400">{role}</div>
-        </div>
-      </div>
-      <div
-        className={`font-mono font-semibold ${
-          eloChange >= 0 ? "text-green-400" : "text-red-400"
-        }`}
-      >
-        {eloChange >= 0 ? "+" : ""}
-        {eloChange}
+        {canEdit && (
+          <button
+            onClick={() => navigate(`/match/${matchId}/edit`)}
+            className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200"
+          >
+            Edit ({minutes}:{String(seconds).padStart(2, '0')})
+          </button>
+        )}
       </div>
     </div>
   );

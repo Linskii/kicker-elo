@@ -10,36 +10,19 @@
       ]
     },
     {
-      "collectionGroup": "matches",
+      "collectionGroup": "users",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "participants", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        { "fieldPath": "teamRanked", "order": "ASCENDING" },
+        { "fieldPath": "attackElo", "order": "DESCENDING" }
       ]
     },
     {
-      "collectionGroup": "matches",
+      "collectionGroup": "users",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "participants", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "endedAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "matches",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "startedAt", "order": "DESCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "matches",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "seasonId", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "endedAt", "order": "DESCENDING" }
+        { "fieldPath": "soloRanked", "order": "ASCENDING" },
+        { "fieldPath": "soloElo", "order": "DESCENDING" }
       ]
     }
   ],

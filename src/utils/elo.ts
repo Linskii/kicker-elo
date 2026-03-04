@@ -1,101 +1,101 @@
-// Elo calculation constants
-const K = 32; // K-factor: how much a single match affects rating
-const C = 400; // Scaling constant for expected score calculation
-
-/**
- * Calculate expected score using Elo formula
- * E = 1 / (1 + 10^((Rb - Ra) / C))
- */
-export function expectedScore(ratingA: number, ratingB: number): number {
-  return 1 / (1 + Math.pow(10, (ratingB - ratingA) / C));
+export interface SeasonStatsLike {
+  attackMatchesPlayed: number;
+  defenseMatchesPlayed: number;
+  soloMatchesPlayed: number;
 }
 
-/**
- * Calculate new Elo rating after a match
- * Rnew = Rold + K × (Actual - Expected)
- */
-export function calculateNewRating(
-  currentRating: number,
-  expectedScore: number,
-  actualScore: number // 1 for win, 0 for loss
-): number {
-  return Math.round(currentRating + K * (actualScore - expectedScore));
-}
+export const ELO_CONFIG = {
+  K_NORMAL: 32,
+  K_PLACEMENT: 64,
+  PLACEMENT_MATCHES_REQUIRED: 3,
+  MAX_ELO_CHANGE: 50,
+  C: 400,
+  MARGIN_MULTIPLIER_MAX: 2.0,
+  MARGIN_MIN_DIFF: 2,
+  MARGIN_MAX_DIFF: 10,
+} as const;
 
-/**
- * Calculate Elo change (delta) for a match
- */
-export function calculateEloChange(
-  currentRating: number,
-  opponentRating: number,
-  won: boolean
-): number {
-  const expected = expectedScore(currentRating, opponentRating);
-  const actual = won ? 1 : 0;
-  return Math.round(K * (actual - expected));
-}
-
-export interface Team {
-  attacker: string | null;
-  defender: string | null;
-  score: number;
-}
-
-export interface EloChanges {
-  [uid: string]: number;
-}
-
-/**
- * Calculate team's average Elo rating
- */
-export function getTeamRating(
-  team: Team,
-  userElos: Record<string, number>
-): number {
-  const players = [team.attacker, team.defender].filter(Boolean) as string[];
-  if (players.length === 0) return 1000;
-
-  const totalElo = players.reduce(
-    (sum, uid) => sum + (userElos[uid] || 1000),
-    0
+export function marginMultiplier(winnerScore: number, loserScore: number): number {
+  const diff = Math.min(
+    Math.max(Math.abs(winnerScore - loserScore), ELO_CONFIG.MARGIN_MIN_DIFF),
+    ELO_CONFIG.MARGIN_MAX_DIFF,
   );
-  return totalElo / players.length;
+  return (
+    1 +
+    ((diff - ELO_CONFIG.MARGIN_MIN_DIFF) / (ELO_CONFIG.MARGIN_MAX_DIFF - ELO_CONFIG.MARGIN_MIN_DIFF)) *
+      (ELO_CONFIG.MARGIN_MULTIPLIER_MAX - 1)
+  );
 }
 
-/**
- * Get all player UIDs from a team
- */
-export function getTeamPlayers(team: Team): string[] {
-  return [team.attacker, team.defender].filter(Boolean) as string[];
+export function calculateEloChange(
+  ratingA: number,
+  ratingB: number,
+  actualA: number,
+  k: number,
+  multiplier: number,
+): number {
+  const expectedA = 1 / (1 + Math.pow(10, (ratingB - ratingA) / ELO_CONFIG.C));
+  const change = k * (actualA - expectedA) * multiplier;
+  return Math.max(-ELO_CONFIG.MAX_ELO_CHANGE, Math.min(ELO_CONFIG.MAX_ELO_CHANGE, change));
 }
 
-/**
- * Calculate Elo changes for all players in a match
- */
-export function calculateMatchEloChanges(
-  redTeam: Team,
-  blueTeam: Team,
-  userElos: Record<string, number>
-): EloChanges {
-  const redRating = getTeamRating(redTeam, userElos);
-  const blueRating = getTeamRating(blueTeam, userElos);
+export function computeNewRating(oldRating: number, change: number): number {
+  return Math.round(oldRating + change);
+}
 
-  const redWon = redTeam.score > blueTeam.score;
-  const redExpected = expectedScore(redRating, blueRating);
-  const blueExpected = expectedScore(blueRating, redRating);
+export function getKFactor(matchesPlayed: number): number {
+  return matchesPlayed < ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED
+    ? ELO_CONFIG.K_PLACEMENT
+    : ELO_CONFIG.K_NORMAL;
+}
 
-  const redEloChange = Math.round(K * ((redWon ? 1 : 0) - redExpected));
-  const blueEloChange = Math.round(K * ((redWon ? 0 : 1) - blueExpected));
+export function computeTeamElo(
+  attackElo: number,
+  defenseElo: number,
+  stats: SeasonStatsLike | null,
+): number | null {
+  const atkPlayed = stats?.attackMatchesPlayed ?? 0;
+  const defPlayed = stats?.defenseMatchesPlayed ?? 0;
+  const req = ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
 
-  const eloChanges: EloChanges = {};
-
-  for (const uid of getTeamPlayers(redTeam)) {
-    eloChanges[uid] = redEloChange;
+  if (atkPlayed >= req && defPlayed >= req) {
+    return Math.round((attackElo + defenseElo) / 2);
   }
-
-  for (const uid of getTeamPlayers(blueTeam)) {
-    eloChanges[uid] = blueEloChange;
+  if (atkPlayed >= req) {
+    return attackElo;
   }
+  if (defPlayed >= req) {
+    return defenseElo;
+  }
+  return null;
+}
 
-  return eloChanges;
+export function isTeamRanked(stats: SeasonStatsLike | null): boolean {
+  const req = ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
+  return (
+    (stats?.attackMatchesPlayed ?? 0) >= req || (stats?.defenseMatchesPlayed ?? 0) >= req
+  );
+}
+
+export function isSoloRanked(stats: SeasonStatsLike | null): boolean {
+  return (stats?.soloMatchesPlayed ?? 0) >= ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
+}
+
+export function checkWinCondition(redScore: number, blueScore: number): boolean {
+  const maxScore = Math.max(redScore, blueScore);
+  const diff = Math.abs(redScore - blueScore);
+  if (maxScore >= 10 && diff >= 2) return true;
+  return false;
+}
+
+export function formatSeasonId(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+export function formatSeasonLabel(seasonId: string): string {
+  const [yearStr, monthStr] = seasonId.split('-');
+  const date = new Date(Number(yearStr), Number(monthStr) - 1);
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }

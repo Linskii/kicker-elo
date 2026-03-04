@@ -1,126 +1,90 @@
-import { useState } from "react";
-import { doc, updateDoc } from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useAuthStore } from "../stores/authStore";
+import { useEffect, useState } from 'react';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import { useAuthStore } from '../stores/authStore.ts';
+import { useSeasonStore } from '../stores/seasonStore.ts';
+import { EloDisplay } from '../components/EloDisplay.tsx';
+import { ELO_CONFIG } from '../utils/elo.ts';
+import type { UserSeasonStats } from '../types/index.ts';
 
-export function ProfilePage() {
-  const { user } = useAuthStore();
+export function ProfilePage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user);
+  const updateUsername = useAuthStore((s) => s.updateUsername);
+  const config = useSeasonStore((s) => s.currentSeasonConfig);
+  const fetchConfig = useSeasonStore((s) => s.fetchCurrentSeasonConfig);
+  const signOut = useAuthStore((s) => s.signOut);
+  const [stats, setStats] = useState<UserSeasonStats | null>(null);
   const [editing, setEditing] = useState(false);
-  const [username, setUsername] = useState(user?.username || "");
-  const [saving, setSaving] = useState(false);
+  const [newName, setNewName] = useState('');
 
-  if (!user) return null;
+  useEffect(() => { fetchConfig(); }, [fetchConfig]);
 
-  const handleSave = async () => {
-    if (!username.trim() || username === user.username) {
-      setEditing(false);
-      return;
+  useEffect(() => {
+    if (!user || !config) return;
+    async function load(): Promise<void> {
+      const snap = await getDoc(doc(db, 'users', user!.uid, 'seasonStats', config!.currentSeasonId));
+      if (snap.exists()) setStats(snap.data() as UserSeasonStats);
     }
+    load();
+  }, [user, config]);
 
-    setSaving(true);
-    try {
-      await updateDoc(doc(db, "users", user.uid), {
-        username: username.trim(),
-      });
+  if (!user) return <div>Loading...</div>;
+
+  const req = ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
+  const winRate = user.wins + user.losses > 0 ? Math.round((user.wins / (user.wins + user.losses)) * 100) : 0;
+
+  async function saveName(): Promise<void> {
+    if (newName.trim()) {
+      await updateUsername(newName.trim());
       setEditing(false);
-    } catch (error) {
-      console.error("Error updating username:", error);
-    } finally {
-      setSaving(false);
     }
-  };
-
-  const winRate =
-    user.matchesPlayed > 0
-      ? Math.round((user.wins / user.matchesPlayed) * 100)
-      : 0;
+  }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">Profile</h1>
-
-      <div className="bg-gray-800 rounded-lg p-6">
-        <div className="flex items-center gap-4 mb-6">
-          <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center text-2xl font-bold">
-            {user.username.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex-1">
-            {editing ? (
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="flex-1 px-3 py-1 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  autoFocus
-                />
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm"
-                >
-                  {saving ? "..." : "Save"}
-                </button>
-                <button
-                  onClick={() => {
-                    setUsername(user.username);
-                    setEditing(false);
-                  }}
-                  className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-semibold">{user.username}</h2>
-                <button
-                  onClick={() => setEditing(true)}
-                  className="text-gray-400 hover:text-white text-sm"
-                >
-                  Edit
-                </button>
-              </div>
-            )}
-            <div className="text-gray-400 text-sm">
-              Member since{" "}
-              {user.createdAt?.toDate().toLocaleDateString() || "recently"}
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold text-blue-400">{user.elo}</div>
-            <div className="text-sm text-gray-400">Elo Rating</div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold">{user.matchesPlayed}</div>
-            <div className="text-sm text-gray-400">Matches</div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold text-green-400">{user.wins}</div>
-            <div className="text-sm text-gray-400">Wins</div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold text-red-400">{user.losses}</div>
-            <div className="text-sm text-gray-400">Losses</div>
-          </div>
-        </div>
-
-        <div className="mt-4 bg-gray-700 rounded-lg p-4">
-          <div className="flex justify-between text-sm mb-2">
-            <span className="text-gray-400">Win Rate</span>
-            <span className="font-medium">{winRate}%</span>
-          </div>
-          <div className="h-2 bg-gray-600 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-green-500 rounded-full"
-              style={{ width: `${winRate}%` }}
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        {editing ? (
+          <div className="flex items-center gap-2">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className="border rounded px-2 py-1 text-lg font-bold"
+              autoFocus
             />
+            <button onClick={saveName} className="text-sm text-blue-600">Save</button>
+            <button onClick={() => setEditing(false)} className="text-sm text-gray-500">Cancel</button>
           </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">{user.username}</h1>
+            <button onClick={() => { setNewName(user.username); setEditing(true); }} className="text-sm text-blue-600">Edit</button>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-xs text-gray-500 mb-1">Attack ELO</div>
+          <EloDisplay elo={user.attackElo} matchesPlayed={stats?.attackMatchesPlayed ?? 0} required={req} roleName="attack" isOwnProfile />
+        </div>
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-xs text-gray-500 mb-1">Defense ELO</div>
+          <EloDisplay elo={user.defenseElo} matchesPlayed={stats?.defenseMatchesPlayed ?? 0} required={req} roleName="defense" isOwnProfile />
+        </div>
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-xs text-gray-500 mb-1">Solo ELO</div>
+          <EloDisplay elo={user.soloElo} matchesPlayed={stats?.soloMatchesPlayed ?? 0} required={req} roleName="solo" isOwnProfile />
         </div>
       </div>
+
+      <div className="bg-white rounded-lg shadow p-4 space-y-2">
+        <div className="text-sm">Season: {user.wins}W / {user.losses}L ({winRate}%)</div>
+        <div className="text-sm">Career: {user.careerWins}W / {user.careerLosses}L</div>
+      </div>
+
+      <button onClick={signOut} className="w-full py-2 bg-red-50 text-red-600 rounded-lg text-sm font-medium hover:bg-red-100">
+        Sign Out
+      </button>
     </div>
   );
 }

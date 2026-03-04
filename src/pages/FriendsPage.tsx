@@ -1,216 +1,94 @@
-import { useEffect, useState } from "react";
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  setDoc,
-  deleteDoc,
-  getDocs,
-  serverTimestamp,
-  limit,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useAuthStore } from "../stores/authStore";
-import type { Relationship, User } from "../types";
-import { PlayerProfilePopup } from "../components/PlayerProfilePopup";
+import { useEffect, useState } from 'react';
+import { useAuthStore } from '../stores/authStore.ts';
+import { useFriendStore } from '../stores/friendStore.ts';
+import type { User } from '../types/index.ts';
 
-export function FriendsPage() {
-  const { user } = useAuthStore();
-  const [relationships, setRelationships] = useState<Relationship[]>([]);
-  const [users, setUsers] = useState<Record<string, User>>({});
-  const [searchUsername, setSearchUsername] = useState("");
+export function FriendsPage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user);
+  const { friends, pendingIncoming, relationships, subscribeTo, sendFriendRequest, acceptFriendRequest, searchUsers } = useFriendStore();
+  const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [searching, setSearching] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [selectedPlayerUid, setSelectedPlayerUid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
+    return subscribeTo(user.uid);
+  }, [user, subscribeTo]);
 
-    // Subscribe to relationships where current user is involved
-    const q = query(
-      collection(db, "relationships"),
-      where("users", "array-contains", user.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const rels = snapshot.docs.map(
-        (doc) => ({ id: doc.id, ...doc.data() }) as Relationship
-      );
-      setRelationships(rels);
-
-      // Fetch user data for all friends
-      const friendIds = rels.flatMap((r) =>
-        r.users.filter((uid) => uid !== user.uid)
-      );
-      const uniqueIds = [...new Set(friendIds)];
-
-      if (uniqueIds.length > 0) {
-        const usersMap: Record<string, User> = {};
-        for (const uid of uniqueIds) {
-          const userDoc = await getDocs(
-            query(collection(db, "users"), where("__name__", "==", uid))
-          );
-          if (!userDoc.empty) {
-            usersMap[uid] = {
-              uid,
-              ...userDoc.docs[0].data(),
-            } as User;
-          }
-        }
-        setUsers(usersMap);
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  useEffect(() => {
-    if (!searchUsername.trim() || !user) {
-      setSearchResults([]);
-      return;
-    }
-
+  async function handleSearch(): Promise<void> {
+    if (!searchQuery.trim()) return;
     setSearching(true);
-    const term = searchUsername.trim().toLowerCase();
-    const timer = setTimeout(async () => {
-      const q = query(
-        collection(db, "users"),
-        where("username", ">=", term),
-        where("username", "<=", term + "\uf8ff"),
-        limit(10)
-      );
-      const snapshot = await getDocs(q);
-      const results = snapshot.docs
-        .map((doc) => ({ uid: doc.id, ...doc.data() }) as User)
-        .filter((u) => u.uid !== user.uid);
-      setSearchResults(results);
-      setSearching(false);
-    }, 300);
+    const results = await searchUsers(searchQuery.trim());
+    setSearchResults(results.filter((u) => u.uid !== user?.uid));
+    setSearching(false);
+  }
 
-    return () => clearTimeout(timer);
-  }, [searchUsername, user]);
+  function getRelationshipStatus(uid: string): string | null {
+    const rel = relationships.find((r) => r.users.includes(uid));
+    if (!rel) return null;
+    return rel.status;
+  }
 
-  const sendFriendRequest = async (friendUid: string) => {
-    if (!user) return;
-
-    // Create alphabetically sorted ID to prevent duplicates
-    const ids = [user.uid, friendUid].sort();
-    const relationshipId = `${ids[0]}_${ids[1]}`;
-
-    await setDoc(doc(db, "relationships", relationshipId), {
-      users: ids,
-      status: "pending",
-      senderId: user.uid,
-      updatedAt: serverTimestamp(),
-    });
-  };
-
-  const removeFriend = async (relationshipId: string) => {
-    await deleteDoc(doc(db, "relationships", relationshipId));
-  };
-
-  if (!user) return null;
-
-  const pendingSent = relationships.filter(
-    (r) => r.status === "pending" && r.senderId === user.uid
-  );
-  const friends = relationships.filter((r) => r.status === "accepted");
+  if (!user) return <div>Loading...</div>;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    <div className="space-y-6">
       <h1 className="text-2xl font-bold">Friends</h1>
 
       {/* Search */}
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h2 className="font-semibold mb-3">Add Friend</h2>
-        <div className="relative">
-          <input
-            type="text"
-            value={searchUsername}
-            onChange={(e) => setSearchUsername(e.target.value)}
-            placeholder="Search by username..."
-            className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 pr-10"
-          />
-          {searching && (
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-              ...
-            </div>
-          )}
-        </div>
-
-        {searchResults.length > 0 && (
-          <div className="mt-3 space-y-2">
-            {searchResults.map((result) => {
-              const existingRel = relationships.find((r) =>
-                r.users.includes(result.uid)
-              );
-              return (
-                <div
-                  key={result.uid}
-                  className="flex items-center justify-between bg-gray-700 p-3 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                      {result.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="font-medium">{result.username}</div>
-                      <div className="text-sm text-gray-400">
-                        Elo: {result.elo}
-                      </div>
-                    </div>
-                  </div>
-                  {existingRel ? (
-                    <span className="text-sm text-gray-400">
-                      {existingRel.status === "pending"
-                        ? "Request pending"
-                        : "Already friends"}
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => sendFriendRequest(result.uid)}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
-                    >
-                      Add Friend
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+      <div className="flex gap-2">
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          placeholder="Search by username..."
+          className="flex-1 px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button onClick={handleSearch} disabled={searching} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          Search
+        </button>
       </div>
 
-      {/* Pending Sent */}
-      {pendingSent.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-4">
-          <h2 className="font-semibold mb-3">Sent Requests</h2>
-          <div className="space-y-2">
-            {pendingSent.map((rel) => {
-              const friendUid = rel.users.find((uid) => uid !== user.uid)!;
-              const friend = users[friendUid];
-              return (
-                <div
-                  key={rel.id}
-                  className="flex items-center justify-between bg-gray-700 p-3 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                      {friend?.username.charAt(0).toUpperCase() || "?"}
-                    </div>
-                    <div className="font-medium">
-                      {friend?.username || "Loading..."}
-                    </div>
-                  </div>
+      {searchResults.length > 0 && (
+        <div className="bg-white rounded-lg shadow divide-y">
+          {searchResults.map((u) => {
+            const status = getRelationshipStatus(u.uid);
+            return (
+              <div key={u.uid} className="flex items-center justify-between p-3">
+                <span className="text-sm font-medium">{u.username}</span>
+                {status === 'accepted' ? (
+                  <span className="text-xs text-green-600">Friends</span>
+                ) : status === 'pending' ? (
+                  <span className="text-xs text-yellow-600">Pending</span>
+                ) : (
                   <button
-                    onClick={() => removeFriend(rel.id)}
-                    className="px-3 py-1 bg-gray-600 hover:bg-gray-500 rounded text-sm"
+                    onClick={() => sendFriendRequest(user.uid, u.uid)}
+                    className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
                   >
-                    Cancel
+                    Add Friend
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pending Requests */}
+      {pendingIncoming.length > 0 && (
+        <div>
+          <h2 className="font-semibold text-sm text-gray-500 mb-2">Incoming Requests</h2>
+          <div className="bg-white rounded-lg shadow divide-y">
+            {pendingIncoming.map((r) => {
+              const senderUid = r.users.find((uid) => uid !== user.uid) ?? r.senderId;
+              return (
+                <div key={r.id} className="flex items-center justify-between p-3">
+                  <span className="text-sm">{senderUid}</span>
+                  <button
+                    onClick={() => acceptFriendRequest(r.id)}
+                    className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+                  >
+                    Accept
                   </button>
                 </div>
               );
@@ -220,60 +98,24 @@ export function FriendsPage() {
       )}
 
       {/* Friends List */}
-      <div className="bg-gray-800 rounded-lg p-4">
-        <h2 className="font-semibold mb-3">Friends ({friends.length})</h2>
-        {loading ? (
-          <div className="text-gray-400 text-center py-4">Loading...</div>
-        ) : friends.length === 0 ? (
-          <div className="text-gray-400 text-center py-4">
-            No friends yet. Search for players above!
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {friends.map((rel) => {
-              const friendUid = rel.users.find((uid) => uid !== user.uid)!;
-              const friend = users[friendUid];
-
+      <div>
+        <h2 className="font-semibold text-sm text-gray-500 mb-2">Your Friends</h2>
+        <div className="bg-white rounded-lg shadow divide-y">
+          {friends.length === 0 ? (
+            <div className="p-4 text-sm text-gray-500 text-center">No friends yet. Search to add some!</div>
+          ) : (
+            friends.map((r) => {
+              const friendUid = r.users.find((uid) => uid !== user.uid) ?? '';
               return (
-                <div
-                  key={rel.id}
-                  className="flex items-center justify-between bg-gray-700 p-3 rounded-lg"
-                >
-                  <button
-                    onClick={() => setSelectedPlayerUid(friendUid)}
-                    className="flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
-                  >
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                      {friend?.username.charAt(0).toUpperCase() || "?"}
-                    </div>
-                    <div>
-                      <div className="font-medium">
-                        {friend?.username || "Loading..."}
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        Elo: {friend?.elo || "-"}
-                      </div>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => removeFriend(rel.id)}
-                    className="px-3 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 rounded text-sm"
-                  >
-                    Remove
-                  </button>
+                <div key={r.id} className="flex items-center justify-between p-3">
+                  <span className="text-sm">{friendUid}</span>
+                  <span className="text-xs text-green-600">Friends</span>
                 </div>
               );
-            })}
-          </div>
-        )}
+            })
+          )}
+        </div>
       </div>
-
-      {selectedPlayerUid && (
-        <PlayerProfilePopup
-          playerUid={selectedPlayerUid}
-          onClose={() => setSelectedPlayerUid(null)}
-        />
-      )}
     </div>
   );
 }

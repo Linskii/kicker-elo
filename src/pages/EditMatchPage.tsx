@@ -1,226 +1,181 @@
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useAuthStore } from "../stores/authStore";
-import { useMatchStore } from "../stores/matchStore";
+import { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Timestamp } from 'firebase/firestore';
+import { DndContext, useDraggable, useDroppable, DragOverlay, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { useMatchStore } from '../stores/matchStore.ts';
+import { useAuthStore } from '../stores/authStore.ts';
+import type { Match, TeamSlot, User } from '../types/index.ts';
 
-function isValidScore(red: number, blue: number): boolean {
-  if (isNaN(red) || isNaN(blue) || red < 0 || blue < 0) return false;
-  const max = Math.max(red, blue);
-  const diff = Math.abs(red - blue);
-  return max >= 10 && diff >= 2 && (max === 10 || diff === 2);
-}
-
-export function EditMatchPage() {
-  const { matchId } = useParams<{ matchId: string }>();
-  const navigate = useNavigate();
-  const { user } = useAuthStore();
-  const { currentMatch, participants, loading, subscribeToMatch, editCompletedMatch } =
-    useMatchStore();
-
-  const [redAttacker, setRedAttacker] = useState<string>("");
-  const [redDefender, setRedDefender] = useState<string>("");
-  const [blueAttacker, setBlueAttacker] = useState<string>("");
-  const [blueDefender, setBlueDefender] = useState<string>("");
-  const [redScore, setRedScore] = useState("");
-  const [blueScore, setBlueScore] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    if (!matchId) return;
-    const unsubscribe = subscribeToMatch(matchId);
-    return () => unsubscribe();
-  }, [matchId, subscribeToMatch]);
-
-  // Initialise form from match data once loaded
-  useEffect(() => {
-    if (!currentMatch) return;
-
-    // Redirect if outside edit window or not a completed match
-    const endedAtMs = currentMatch.endedAt?.toMillis() ?? 0;
-    if (currentMatch.status !== "completed" || Date.now() - endedAtMs >= 10 * 60 * 1000) {
-      navigate(`/match/${matchId}/result`, { replace: true });
-      return;
-    }
-
-    setRedAttacker(currentMatch.redTeam.attacker ?? "");
-    setRedDefender(currentMatch.redTeam.defender ?? "");
-    setBlueAttacker(currentMatch.blueTeam.attacker ?? "");
-    setBlueDefender(currentMatch.blueTeam.defender ?? "");
-    setRedScore(String(currentMatch.redTeam.score));
-    setBlueScore(String(currentMatch.blueTeam.score));
-  }, [currentMatch, matchId, navigate]);
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Loading match...</div>
-      </div>
-    );
-  }
-
-  if (!currentMatch || !user) {
-    return (
-      <div className="flex justify-center py-12">
-        <div className="text-gray-400">Match not found</div>
-      </div>
-    );
-  }
-
-  const red = parseInt(redScore, 10);
-  const blue = parseInt(blueScore, 10);
-  const scoreValid = isValidScore(red, blue);
-  const showScoreError = (redScore !== "" || blueScore !== "") && !scoreValid;
-
-  // Build options for player selects: "none" + all participants
-  const participantOptions = currentMatch.participants.map((uid) => ({
-    uid,
-    username: participants[uid]?.username ?? uid,
-  }));
-
-  const handleSubmit = async () => {
-    if (!matchId || !scoreValid) return;
-    setSubmitting(true);
-    try {
-      await editCompletedMatch(
-        matchId,
-        { attacker: redAttacker || null, defender: redDefender || null },
-        { attacker: blueAttacker || null, defender: blueDefender || null },
-        red,
-        blue
-      );
-      navigate(`/match/${matchId}/result`);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+function DraggablePlayer({ uid, username }: { uid: string; username: string }): React.ReactElement {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: uid });
   return (
-    <div className="max-w-lg mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Edit Match Result</h1>
-        <p className="text-gray-400 text-sm mt-1">
-          Changes are locked 10 minutes after the match ended.
-        </p>
-      </div>
-
-      {/* Score inputs */}
-      <div className="flex items-center justify-center gap-6">
-        <div className="text-center">
-          <div className="text-red-400 text-lg font-medium mb-2">Red</div>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={2}
-            value={redScore}
-            onChange={(e) => setRedScore(e.target.value.replace(/\D/g, ""))}
-            placeholder="—"
-            className="w-24 h-20 text-5xl font-bold text-center bg-gray-800 border-2 border-red-500 rounded-xl focus:outline-none focus:border-red-300"
-          />
-        </div>
-        <div className="text-3xl text-gray-500 mt-6">:</div>
-        <div className="text-center">
-          <div className="text-blue-400 text-lg font-medium mb-2">Blue</div>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={2}
-            value={blueScore}
-            onChange={(e) => setBlueScore(e.target.value.replace(/\D/g, ""))}
-            placeholder="—"
-            className="w-24 h-20 text-5xl font-bold text-center bg-gray-800 border-2 border-blue-500 rounded-xl focus:outline-none focus:border-blue-300"
-          />
-        </div>
-      </div>
-
-      <div className="text-center text-sm">
-        {showScoreError ? (
-          <span className="text-yellow-400">Winner needs 10+ goals and a 2-goal lead</span>
-        ) : (
-          <span className="text-gray-400">First to 10, win by 2</span>
-        )}
-      </div>
-
-      {/* Team composition */}
-      <div className="grid sm:grid-cols-2 gap-4">
-        <div className="bg-gray-800 rounded-lg p-4 space-y-3">
-          <h2 className="text-red-400 font-semibold">Red Team</h2>
-          <PlayerSelect
-            label="Attacker"
-            value={redAttacker}
-            onChange={setRedAttacker}
-            options={participantOptions}
-          />
-          <PlayerSelect
-            label="Defender"
-            value={redDefender}
-            onChange={setRedDefender}
-            options={participantOptions}
-          />
-        </div>
-        <div className="bg-gray-800 rounded-lg p-4 space-y-3">
-          <h2 className="text-blue-400 font-semibold">Blue Team</h2>
-          <PlayerSelect
-            label="Attacker"
-            value={blueAttacker}
-            onChange={setBlueAttacker}
-            options={participantOptions}
-          />
-          <PlayerSelect
-            label="Defender"
-            value={blueDefender}
-            onChange={setBlueDefender}
-            options={participantOptions}
-          />
-        </div>
-      </div>
-
-      <div className="flex gap-3">
-        <button
-          onClick={() => navigate(`/match/${matchId}/result`)}
-          className="flex-1 py-3 bg-gray-700 hover:bg-gray-600 rounded-lg font-medium"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSubmit}
-          disabled={!scoreValid || submitting}
-          className="flex-1 py-3 bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded-lg font-bold transition-colors"
-        >
-          {submitting ? "Saving…" : "Save Changes"}
-        </button>
-      </div>
+    <div ref={setNodeRef} {...listeners} {...attributes} className={`px-3 py-2 rounded-lg text-sm font-medium bg-blue-100 text-blue-700 cursor-grab ${isDragging ? 'opacity-50' : ''}`}>
+      {username}
     </div>
   );
 }
 
-function PlayerSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { uid: string; username: string }[];
-}) {
+function DroppableSlot({ id, label, player, color }: { id: string; label: string; player: User | null; color: string }): React.ReactElement {
+  const { setNodeRef, isOver } = useDroppable({ id });
   return (
-    <div>
-      <label className="block text-xs text-gray-400 mb-1">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-gray-400"
+    <div ref={setNodeRef} className={`border-2 border-dashed rounded-lg p-3 text-center min-h-[60px] flex flex-col items-center justify-center ${isOver ? 'border-blue-400 bg-blue-50' : 'border-gray-300'}`}>
+      <div className={`text-xs font-medium mb-1 ${color}`}>{label}</div>
+      {player ? <div className="text-sm font-bold">{player.username}</div> : <div className="text-xs text-gray-400">Drop here</div>}
+    </div>
+  );
+}
+
+export function EditMatchPage(): React.ReactElement {
+  const { matchId } = useParams<{ matchId: string }>();
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const { match, participants, subscribeToMatch, editCompletedMatch } = useMatchStore();
+  const [localSlots, setLocalSlots] = useState<Record<string, string | null>>({});
+  const [redScore, setRedScore] = useState(0);
+  const [blueScore, setBlueScore] = useState(0);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (!matchId) return;
+    return subscribeToMatch(matchId);
+  }, [matchId, subscribeToMatch]);
+
+  useEffect(() => {
+    if (!match || initialized) return;
+    if (match.status !== 'completed') {
+      navigate(`/match/${matchId}`, { replace: true });
+      return;
+    }
+    if (match.endedAt) {
+      const elapsed = Timestamp.now().toMillis() - match.endedAt.toMillis();
+      if (elapsed > 10 * 60 * 1000) {
+        navigate(`/match/${matchId}/result`, { replace: true });
+        return;
+      }
+    }
+    setLocalSlots({
+      redAttacker: match.redAttacker,
+      redDefender: match.redDefender,
+      blueAttacker: match.blueAttacker,
+      blueDefender: match.blueDefender,
+      playerRed: match.playerRed,
+      playerBlue: match.playerBlue,
+    });
+    setRedScore(match.redScore);
+    setBlueScore(match.blueScore);
+    setInitialized(true);
+  }, [match, initialized, matchId, navigate]);
+
+  if (!match || !user || !matchId || !initialized) return <div className="p-4">Loading...</div>;
+
+  const isSolo = match.type === 'solo';
+  const slotsConfig: { id: TeamSlot; label: string; color: string }[] = isSolo
+    ? [
+        { id: 'playerRed', label: 'Red', color: 'text-red-600' },
+        { id: 'playerBlue', label: 'Blue', color: 'text-blue-600' },
+      ]
+    : [
+        { id: 'redAttacker', label: 'Red Attacker', color: 'text-red-600' },
+        { id: 'redDefender', label: 'Red Defender', color: 'text-red-700' },
+        { id: 'blueAttacker', label: 'Blue Attacker', color: 'text-blue-600' },
+        { id: 'blueDefender', label: 'Blue Defender', color: 'text-blue-700' },
+      ];
+
+  function getSlotPlayer(slot: TeamSlot): User | null {
+    const uid = localSlots[slot];
+    return uid ? participants[uid] ?? null : null;
+  }
+
+  function handleDragStart(e: DragStartEvent): void { setActiveId(e.active.id as string); }
+
+  function handleDragEnd(e: DragEndEvent): void {
+    setActiveId(null);
+    if (!e.over) return;
+    const playerUid = e.active.id as string;
+    const slot = e.over.id as string;
+    setLocalSlots((prev) => {
+      const next = { ...prev };
+      for (const key of Object.keys(next)) {
+        if (next[key] === playerUid) next[key] = null;
+      }
+      next[slot] = playerUid;
+      return next;
+    });
+  }
+
+  async function handleSave(): Promise<void> {
+    setSaving(true);
+    try {
+      const newSlots: Partial<Pick<Match, 'redAttacker' | 'redDefender' | 'blueAttacker' | 'blueDefender' | 'playerRed' | 'playerBlue'>> = {};
+      for (const slot of slotsConfig) {
+        (newSlots as Record<string, string | null>)[slot.id] = localSlots[slot.id] ?? null;
+      }
+      await editCompletedMatch(matchId!, newSlots, redScore, blueScore);
+      navigate(`/match/${matchId}/result`, { replace: true });
+    } catch {
+      setSaving(false);
+    }
+  }
+
+  const activePlayer = activeId ? participants[activeId] : null;
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">Edit Match</h1>
+
+      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="flex flex-wrap gap-2">
+          {match.participants.map((uid) => {
+            const p = participants[uid];
+            if (!p) return null;
+            return <DraggablePlayer key={uid} uid={uid} username={p.username} />;
+          })}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {slotsConfig.map((slot) => (
+            <DroppableSlot key={slot.id} id={slot.id} label={slot.label} player={getSlotPlayer(slot.id)} color={slot.color} />
+          ))}
+        </div>
+
+        <DragOverlay>
+          {activePlayer ? <div className="px-3 py-2 rounded-lg text-sm font-medium bg-blue-200 text-blue-800 shadow-lg">{activePlayer.username}</div> : null}
+        </DragOverlay>
+      </DndContext>
+
+      <div className="flex items-center justify-center gap-4">
+        <div className="text-center">
+          <label className="text-xs text-gray-500">Red Score</label>
+          <input
+            type="number"
+            min={0}
+            value={redScore}
+            onChange={(e) => setRedScore(Number(e.target.value))}
+            className="block w-20 mx-auto text-center border rounded px-2 py-1 text-lg font-bold"
+          />
+        </div>
+        <span className="text-gray-300 text-lg">-</span>
+        <div className="text-center">
+          <label className="text-xs text-gray-500">Blue Score</label>
+          <input
+            type="number"
+            min={0}
+            value={blueScore}
+            onChange={(e) => setBlueScore(Number(e.target.value))}
+            className="block w-20 mx-auto text-center border rounded px-2 py-1 text-lg font-bold"
+          />
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving || redScore === blueScore}
+        className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
       >
-        <option value="">— empty —</option>
-        {options.map((p) => (
-          <option key={p.uid} value={p.uid}>
-            {p.username}
-          </option>
-        ))}
-      </select>
+        {saving ? 'Saving...' : 'Save Changes'}
+      </button>
     </div>
   );
 }

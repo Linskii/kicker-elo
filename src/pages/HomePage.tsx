@@ -1,65 +1,87 @@
-import { Link } from "react-router-dom";
-import { useAuthStore } from "../stores/authStore";
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { doc, getDoc, collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import { useAuthStore } from '../stores/authStore.ts';
+import { useSeasonStore } from '../stores/seasonStore.ts';
+import { EloDisplay } from '../components/EloDisplay.tsx';
+import { ELO_CONFIG, computeTeamElo } from '../utils/elo.ts';
+import type { UserSeasonStats } from '../types/index.ts';
 
-export function HomePage() {
-  const { user } = useAuthStore();
+export function HomePage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user);
+  const config = useSeasonStore((s) => s.currentSeasonConfig);
+  const fetchConfig = useSeasonStore((s) => s.fetchCurrentSeasonConfig);
+  const [stats, setStats] = useState<UserSeasonStats | null>(null);
+  const [teamRank, setTeamRank] = useState<number | null>(null);
+  const [soloRank, setSoloRank] = useState<number | null>(null);
 
-  if (!user) return null;
+  useEffect(() => { fetchConfig(); }, [fetchConfig]);
+
+  useEffect(() => {
+    if (!user || !config) return;
+    async function load(): Promise<void> {
+      const statsSnap = await getDoc(doc(db, 'users', user!.uid, 'seasonStats', config!.currentSeasonId));
+      if (statsSnap.exists()) setStats(statsSnap.data() as UserSeasonStats);
+
+      if (user!.teamRanked) {
+        const q = query(collection(db, 'users'), where('teamRanked', '==', true));
+        const snap = await getDocs(q);
+        const all = snap.docs.map((d) => {
+          const data = d.data();
+          return { uid: d.id, teamElo: computeTeamElo(data.attackElo as number, data.defenseElo as number, null) ?? 0 };
+        });
+        all.sort((a, b) => b.teamElo - a.teamElo);
+        const idx = all.findIndex((p) => p.uid === user!.uid);
+        setTeamRank(idx >= 0 ? idx + 1 : null);
+      }
+      if (user!.soloRanked) {
+        const q = query(collection(db, 'users'), where('soloRanked', '==', true), orderBy('soloElo', 'desc'));
+        const snap = await getDocs(q);
+        const idx = snap.docs.findIndex((d) => d.id === user!.uid);
+        setSoloRank(idx >= 0 ? idx + 1 : null);
+      }
+    }
+    load();
+  }, [user, config]);
+
+  if (!user) return <div>Loading...</div>;
+
+  const req = ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
+  const winRate = user.wins + user.losses > 0 ? Math.round((user.wins / (user.wins + user.losses)) * 100) : 0;
 
   return (
-    <div className="space-y-8">
-      <div className="text-center">
-        <h1 className="text-3xl font-bold mb-2">
-          Welcome back, {user.username}!
-        </h1>
-        <p className="text-gray-400">Ready for a match?</p>
-      </div>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">Welcome, {user.username}</h1>
 
-      {/* Stats Card */}
-      <div className="bg-gray-800 rounded-lg p-6">
-        <h2 className="text-lg font-semibold mb-4">Your Stats</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold text-blue-400">{user.elo}</div>
-            <div className="text-sm text-gray-400">Elo Rating</div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold">{user.matchesPlayed}</div>
-            <div className="text-sm text-gray-400">Matches</div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold text-green-400">{user.wins}</div>
-            <div className="text-sm text-gray-400">Wins</div>
-          </div>
-          <div className="bg-gray-700 rounded-lg p-4 text-center">
-            <div className="text-3xl font-bold text-red-400">{user.losses}</div>
-            <div className="text-sm text-gray-400">Losses</div>
-          </div>
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-xs text-gray-500 mb-1">Attack ELO</div>
+          <EloDisplay elo={user.attackElo} matchesPlayed={stats?.attackMatchesPlayed ?? 0} required={req} roleName="attack" isOwnProfile />
+        </div>
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-xs text-gray-500 mb-1">Defense ELO</div>
+          <EloDisplay elo={user.defenseElo} matchesPlayed={stats?.defenseMatchesPlayed ?? 0} required={req} roleName="defense" isOwnProfile />
+        </div>
+        <div className="bg-white rounded-lg shadow p-4 text-center">
+          <div className="text-xs text-gray-500 mb-1">Solo ELO</div>
+          <EloDisplay elo={user.soloElo} matchesPlayed={stats?.soloMatchesPlayed ?? 0} required={req} roleName="solo" isOwnProfile />
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid sm:grid-cols-2 gap-4">
-        <Link
-          to="/match/new"
-          className="bg-blue-600 hover:bg-blue-700 rounded-lg p-6 text-center transition-colors"
-        >
-          <div className="text-2xl mb-2">+</div>
-          <div className="font-semibold">Create Match</div>
-          <div className="text-sm text-blue-200">
-            Start a new 1v1, 1v2, or 2v2 game
-          </div>
-        </Link>
-
-        <Link
-          to="/leaderboard"
-          className="bg-gray-800 hover:bg-gray-700 rounded-lg p-6 text-center transition-colors border border-gray-700"
-        >
-          <div className="text-2xl mb-2">🏆</div>
-          <div className="font-semibold">Leaderboard</div>
-          <div className="text-sm text-gray-400">See top players</div>
-        </Link>
+      <div className="bg-white rounded-lg shadow p-4 space-y-2">
+        {teamRank !== null && <div className="text-sm">Team Rank: <span className="font-bold">#{teamRank}</span></div>}
+        {soloRank !== null && <div className="text-sm">Solo Rank: <span className="font-bold">#{soloRank}</span></div>}
+        <div className="text-sm">Season: {user.wins}W / {user.losses}L ({winRate}%)</div>
+        <div className="text-sm">Career: {user.careerWins}W / {user.careerLosses}L</div>
       </div>
+
+      <Link
+        to="/match/new"
+        className="block w-full py-3 bg-blue-600 text-white text-center rounded-lg font-medium hover:bg-blue-700"
+      >
+        Start New Match
+      </Link>
     </div>
   );
 }

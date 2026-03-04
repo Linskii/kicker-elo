@@ -1,185 +1,93 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  onSnapshot,
-} from "firebase/firestore";
-import { db } from "../lib/firebase";
-import { useAuthStore } from "../stores/authStore";
-import { useMatchStore } from "../stores/matchStore";
-import type { Relationship, User } from "../types";
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../stores/authStore.ts';
+import { useMatchStore } from '../stores/matchStore.ts';
+import { useFriendStore } from '../stores/friendStore.ts';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase.ts';
+import type { User } from '../types/index.ts';
 
-export function NewMatchPage() {
-  const { user } = useAuthStore();
-  const { createMatch, invitePlayer, currentMatch, subscribeToMatch } =
-    useMatchStore();
+export function NewMatchPage(): React.ReactElement {
+  const user = useAuthStore((s) => s.user);
+  const { createMatch, invitePlayer } = useMatchStore();
+  const { friends, subscribeTo } = useFriendStore();
   const navigate = useNavigate();
-
-  const [friends, setFriends] = useState<User[]>([]);
-  const [matchId, setMatchId] = useState<string | null>(null);
+  const [friendUsers, setFriendUsers] = useState<User[]>([]);
+  const [selectedUids, setSelectedUids] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
 
-  // Fetch friends
   useEffect(() => {
     if (!user) return;
+    return subscribeTo(user.uid);
+  }, [user, subscribeTo]);
 
-    const q = query(
-      collection(db, "relationships"),
-      where("users", "array-contains", user.uid),
-      where("status", "==", "accepted")
-    );
-
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const relationships = snapshot.docs.map(
-        (doc) => doc.data() as Relationship
-      );
-
-      const friendIds = relationships
-        .flatMap((r) => r.users)
-        .filter((uid) => uid !== user.uid);
-
-      if (friendIds.length > 0) {
-        const friendsList: User[] = [];
-        for (const uid of friendIds) {
-          const userDoc = await getDocs(
-            query(collection(db, "users"), where("__name__", "==", uid))
-          );
-          if (!userDoc.empty) {
-            friendsList.push({
-              uid,
-              ...userDoc.docs[0].data(),
-            } as User);
-          }
-        }
-        setFriends(friendsList);
+  useEffect(() => {
+    async function loadFriendUsers(): Promise<void> {
+      if (!user) return;
+      const users: User[] = [];
+      for (const r of friends) {
+        const friendUid = r.users.find((uid) => uid !== user.uid);
+        if (!friendUid) continue;
+        const snap = await getDoc(doc(db, 'users', friendUid));
+        if (snap.exists()) users.push({ ...snap.data(), uid: snap.id } as User);
       }
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  // Subscribe to match after creation
-  useEffect(() => {
-    if (!matchId) return;
-    const unsubscribe = subscribeToMatch(matchId);
-    return () => unsubscribe();
-  }, [matchId, subscribeToMatch]);
-
-  const handleCreateMatch = async () => {
-    if (!user) return;
-    setCreating(true);
-    try {
-      const newMatchId = await createMatch(user.uid);
-      setMatchId(newMatchId);
-    } catch (error) {
-      console.error("Error creating match:", error);
-    } finally {
-      setCreating(false);
+      setFriendUsers(users);
     }
-  };
+    loadFriendUsers();
+  }, [friends, user]);
 
-  const handleInvite = async (friendUid: string) => {
-    if (!matchId || !user) return;
-    await invitePlayer(matchId, friendUid);
-  };
-
-  const getPlayerStatus = (friendUid: string): "ready" | "not_invited" => {
-    if (!currentMatch) return "not_invited";
-    if (currentMatch.participants.includes(friendUid)) return "ready";
-    return "not_invited";
-  };
-
-  const handleGoToLobby = () => {
-    if (matchId) {
-      navigate(`/match/${matchId}`);
-    }
-  };
-
-  if (!user) return null;
-
-  // Before match is created
-  if (!matchId) {
-    return (
-      <div className="max-w-md mx-auto space-y-6">
-        <h1 className="text-2xl font-bold">New Match</h1>
-
-        <div className="bg-gray-800 rounded-lg p-6 text-center">
-          <p className="text-gray-400 mb-6">
-            Create a match lobby and invite your friends to play.
-          </p>
-          <button
-            onClick={handleCreateMatch}
-            disabled={creating}
-            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 rounded-lg font-medium"
-          >
-            {creating ? "Creating..." : "Create Match Lobby"}
-          </button>
-        </div>
-      </div>
+  function toggleSelect(uid: string): void {
+    setSelectedUids((prev) =>
+      prev.includes(uid) ? prev.filter((u) => u !== uid) : prev.length < 3 ? [...prev, uid] : prev,
     );
   }
 
-  // After match is created - invite friends
+  async function handleCreate(): Promise<void> {
+    if (!user || selectedUids.length === 0) return;
+    setCreating(true);
+    try {
+      const matchId = await createMatch(user.uid);
+      for (const uid of selectedUids) {
+        await invitePlayer(matchId, uid);
+      }
+      navigate(`/match/${matchId}`);
+    } catch {
+      setCreating(false);
+    }
+  }
+
+  if (!user) return <div>Loading...</div>;
+
   return (
-    <div className="max-w-md mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">Invite Players</h1>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">New Match</h1>
+      <p className="text-sm text-gray-500">Select 1 or 3 friends to play with ({selectedUids.length} selected)</p>
 
-      <div className="bg-gray-800 rounded-lg p-4">
-        <div className="text-sm text-gray-400 mb-4">
-          Invited: {currentMatch?.participants.length || 1} player(s)
-        </div>
-
-        {friends.length === 0 ? (
-          <div className="text-center py-4 text-gray-400">
-            No friends to invite. Add friends first!
-          </div>
+      <div className="bg-white rounded-lg shadow divide-y">
+        {friendUsers.length === 0 ? (
+          <div className="p-4 text-sm text-gray-500 text-center">Add friends first to start a match</div>
         ) : (
-          <div className="space-y-2">
-            {friends.map((friend) => {
-              const status = getPlayerStatus(friend.uid);
-              return (
-                <div
-                  key={friend.uid}
-                  className="flex items-center justify-between bg-gray-700 p-3 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-sm">
-                      {friend.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <div className="font-medium">{friend.username}</div>
-                      <div className="text-sm text-gray-400">
-                        Elo: {friend.elo}
-                      </div>
-                    </div>
-                  </div>
-                  {status === "ready" ? (
-                    <span className="px-2 py-0.5 text-xs rounded-full border bg-green-500/20 text-green-400 border-green-500/50">
-                      Ready
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => handleInvite(friend.uid)}
-                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm"
-                    >
-                      Invite
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          friendUsers.map((f) => (
+            <button
+              key={f.uid}
+              onClick={() => toggleSelect(f.uid)}
+              className={`w-full flex items-center justify-between p-3 text-left ${selectedUids.includes(f.uid) ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+            >
+              <span className="text-sm font-medium">{f.username}</span>
+              {selectedUids.includes(f.uid) && (
+                <span className="text-blue-600 text-sm">Selected</span>
+              )}
+            </button>
+          ))
         )}
       </div>
 
       <button
-        onClick={handleGoToLobby}
-        className="w-full py-3 rounded-lg font-medium transition-colors bg-green-600 hover:bg-green-700"
+        onClick={handleCreate}
+        disabled={creating || (selectedUids.length !== 1 && selectedUids.length !== 3)}
+        className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
       >
-        Go to Lobby
+        {creating ? 'Creating...' : 'Create Match'}
       </button>
     </div>
   );

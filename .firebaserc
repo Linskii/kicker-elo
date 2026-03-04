@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "kicker-elo-17ec0"
-  }
+    "kicker_elo": "kicker-elo-6c0e7"
+  },
+  "targets": {},
+  "etags": {}
 }
