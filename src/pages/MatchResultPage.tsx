@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
+import { FieldView } from "../components/FieldView";
 
 export function MatchResultPage() {
   const { matchId } = useParams<{ matchId: string }>();
@@ -94,6 +95,18 @@ export function MatchResultPage() {
           </div>
         </div>
       </div>
+
+      {/* Field visualization */}
+      <FieldView
+        redTeam={{
+          attacker: currentMatch.redTeam.attacker ? participants[currentMatch.redTeam.attacker] : null,
+          defender: currentMatch.redTeam.defender ? participants[currentMatch.redTeam.defender] : null,
+        }}
+        blueTeam={{
+          attacker: currentMatch.blueTeam.attacker ? participants[currentMatch.blueTeam.attacker] : null,
+          defender: currentMatch.blueTeam.defender ? participants[currentMatch.blueTeam.defender] : null,
+        }}
+      />
 
       {/* Player Results */}
       <div className="grid sm:grid-cols-2 gap-4">

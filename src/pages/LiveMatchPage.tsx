@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuthStore } from "../stores/authStore";
 import { useMatchStore } from "../stores/matchStore";
+import { FieldView } from "../components/FieldView";
 
 function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
@@ -171,6 +172,12 @@ export function LiveMatchPage() {
           Delete Match
         </button>
       )}
+
+      {/* Field visualization */}
+      <FieldView
+        redTeam={{ attacker: redAttacker, defender: redDefender }}
+        blueTeam={{ attacker: blueAttacker, defender: blueDefender }}
+      />
 
       {/* Team info & swap */}
       <div className="grid grid-cols-2 gap-4">
