@@ -6,7 +6,7 @@ import { useSeasonStore } from '../stores/seasonStore.ts';
 export function AdminPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
-  const { currentSeasonConfig, seasons, fetchCurrentSeasonConfig, fetchSeasons, adminCloseSeason, adminUpdateSeasonLabel } = useSeasonStore();
+  const { currentSeasonConfig, seasons, fetchCurrentSeasonConfig, fetchSeasons, adminInitSeason, adminCloseSeason, adminUpdateSeasonLabel } = useSeasonStore();
   const [closing, setClosing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
@@ -41,13 +41,22 @@ export function AdminPage(): React.ReactElement {
         <div className="text-sm">
           Current Season: <span className="font-bold">{currentSeasonConfig?.currentSeasonId ?? 'N/A'}</span>
         </div>
-        <button
-          onClick={handleClose}
-          disabled={closing}
-          className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
-        >
-          {closing ? 'Closing...' : 'Close Current Season'}
-        </button>
+        {currentSeasonConfig ? (
+          <button
+            onClick={handleClose}
+            disabled={closing}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:opacity-50"
+          >
+            {closing ? 'Closing...' : 'Close Current Season'}
+          </button>
+        ) : (
+          <button
+            onClick={adminInitSeason}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+          >
+            Initialize First Season
+          </button>
+        )}
       </div>
 
       <div className="space-y-2">

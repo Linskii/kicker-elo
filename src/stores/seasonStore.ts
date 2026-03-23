@@ -4,6 +4,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  setDoc,
   updateDoc,
   query,
   orderBy,
@@ -20,6 +21,7 @@ interface SeasonState {
   fetchSeasons: () => Promise<void>;
   fetchSeasonById: (seasonId: string) => Promise<Season | null>;
   fetchCurrentSeasonConfig: () => Promise<void>;
+  adminInitSeason: () => Promise<void>;
   adminCloseSeason: () => Promise<void>;
   adminUpdateSeasonLabel: (seasonId: string, label: string) => Promise<void>;
 }
@@ -46,6 +48,12 @@ export const useSeasonStore = create<SeasonState>((set, get) => ({
     if (snap.exists()) {
       set({ currentSeasonConfig: snap.data() as SeasonsConfig });
     }
+  },
+
+  adminInitSeason: async () => {
+    const seasonId = formatSeasonId(new Date());
+    await setDoc(doc(db, 'config', 'seasons'), { currentSeasonId: seasonId });
+    await get().fetchCurrentSeasonConfig();
   },
 
   adminCloseSeason: async () => {
