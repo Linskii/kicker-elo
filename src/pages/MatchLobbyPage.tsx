@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { DndContext, DragOverlay, useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { DndContext, DragOverlay, useDraggable, useDroppable, useSensor, useSensors, MouseSensor, TouchSensor, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { useAuthStore } from '../stores/authStore.ts';
 import { useMatchStore } from '../stores/matchStore.ts';
 import { FieldView } from '../components/FieldView.tsx';
@@ -74,6 +74,10 @@ export function MatchLobbyPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user);
   const { match, participants, subscribeToMatch, assignToTeam, startMatch, deleteMatch, removePlayer } = useMatchStore();
   const [activeId, setActiveId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
 
   useEffect(() => {
     if (!matchId) return;
@@ -162,7 +166,7 @@ export function MatchLobbyPage(): React.ReactElement {
 
       <FieldView match={match} participants={participants} />
 
-      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         {/* Player pool */}
         <div className="flex flex-wrap gap-2">
           {match.participants.map((uid) => {

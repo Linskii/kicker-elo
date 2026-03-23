@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Timestamp } from 'firebase/firestore';
-import { DndContext, useDraggable, useDroppable, DragOverlay, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, DragOverlay, useSensor, useSensors, MouseSensor, TouchSensor, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { useMatchStore } from '../stores/matchStore.ts';
 import { useAuthStore } from '../stores/authStore.ts';
 import type { Match, TeamSlot, User } from '../types/index.ts';
@@ -35,6 +35,10 @@ export function EditMatchPage(): React.ReactElement {
   const [blueScore, setBlueScore] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+  );
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -125,7 +129,7 @@ export function EditMatchPage(): React.ReactElement {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">Edit Match</h1>
 
-      <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="flex flex-wrap gap-2">
           {match.participants.map((uid) => {
             const p = participants[uid];
