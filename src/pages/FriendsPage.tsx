@@ -5,7 +5,7 @@ import type { User } from '../types/index.ts';
 
 export function FriendsPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user);
-  const { friends, pendingIncoming, relationships, subscribeTo, sendFriendRequest, acceptFriendRequest, searchUsers } = useFriendStore();
+  const { friends, pendingIncoming, relationships, usernames, subscribeTo, sendFriendRequest, acceptFriendRequest, searchUsers } = useFriendStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [searching, setSearching] = useState(false);
@@ -83,7 +83,7 @@ export function FriendsPage(): React.ReactElement {
               const senderUid = r.users.find((uid) => uid !== user.uid) ?? r.senderId;
               return (
                 <div key={r.id} className="flex items-center justify-between p-3">
-                  <span className="text-sm">{senderUid}</span>
+                  <span className="text-sm">{usernames[senderUid] ?? senderUid}</span>
                   <button
                     onClick={() => acceptFriendRequest(r.id)}
                     className="text-xs bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
@@ -108,7 +108,7 @@ export function FriendsPage(): React.ReactElement {
               const friendUid = r.users.find((uid) => uid !== user.uid) ?? '';
               return (
                 <div key={r.id} className="flex items-center justify-between p-3">
-                  <span className="text-sm">{friendUid}</span>
+                  <span className="text-sm">{usernames[friendUid] ?? friendUid}</span>
                   <span className="text-xs text-green-600">Friends</span>
                 </div>
               );

@@ -5,6 +5,7 @@ import {
   query,
   where,
   getDocs,
+  getDoc,
   setDoc,
   updateDoc,
   onSnapshot,
@@ -17,6 +18,7 @@ interface FriendState {
   relationships: Relationship[];
   pendingIncoming: Relationship[];
   friends: Relationship[];
+  usernames: Record<string, string>;
   subscribeTo: (uid: string) => () => void;
   sendFriendRequest: (fromUid: string, toUid: string) => Promise<void>;
   acceptFriendRequest: (relationshipId: string) => Promise<void>;
@@ -32,15 +34,32 @@ export const useFriendStore = create<FriendState>((set) => ({
   relationships: [],
   pendingIncoming: [],
   friends: [],
+  usernames: {},
 
   subscribeTo: (uid) => {
     const q = query(collection(db, 'relationships'), where('users', 'array-contains', uid));
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, async (snap) => {
       const rels = snap.docs.map((d) => ({ ...d.data(), id: d.id }) as Relationship);
+
+      const otherUids = new Set(rels.flatMap((r) => r.users).filter((u) => u !== uid));
+      const known = useFriendStore.getState().usernames;
+      const unknown = [...otherUids].filter((u) => !known[u]);
+
+      const fetched: Record<string, string> = {};
+      await Promise.all(
+        unknown.map(async (u) => {
+          const snap = await getDoc(doc(db, 'users', u));
+          if (snap.exists()) {
+            fetched[u] = (snap.data() as User).username;
+          }
+        }),
+      );
+
       set({
         relationships: rels,
         pendingIncoming: rels.filter((r) => r.status === 'pending' && r.senderId !== uid),
         friends: rels.filter((r) => r.status === 'accepted'),
+        usernames: { ...known, ...fetched },
       });
     });
     return unsub;
