@@ -132,8 +132,18 @@ export const useSeasonStore = create<SeasonState>((set, get) => ({
         soloLeaderboard,
       });
 
-      // Update config to new season
-      const newSeasonId = formatSeasonId(new Date());
+      // Pick a new season ID that doesn't clash with the closed one or existing snapshots
+      const baseId = formatSeasonId(new Date());
+      let newSeasonId = baseId;
+      let counter = 2;
+      while (true) {
+        if (newSeasonId !== currentSeasonId) {
+          const existing = await txn.get(doc(db, 'seasons', newSeasonId));
+          if (!existing.exists()) break;
+        }
+        newSeasonId = `${baseId}-${counter}`;
+        counter++;
+      }
       txn.update(configRef, { currentSeasonId: newSeasonId });
 
       // Reset all users — must use batch outside transaction
