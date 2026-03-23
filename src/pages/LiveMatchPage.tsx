@@ -12,6 +12,7 @@ export function LiveMatchPage(): React.ReactElement {
   const { match, participants, subscribeToMatch, completeMatch } = useMatchStore();
   const [redScore, setRedScore] = useState('');
   const [blueScore, setBlueScore] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!matchId) return;
@@ -29,8 +30,13 @@ export function LiveMatchPage(): React.ReactElement {
   const validScore = !isNaN(redNum) && !isNaN(blueNum) && isValidFinalScore(redNum, blueNum);
 
   async function handleFinish(): Promise<void> {
-    if (!validScore) return;
-    await completeMatch(matchId!, redNum, blueNum);
+    if (!validScore || submitting) return;
+    setSubmitting(true);
+    try {
+      await completeMatch(matchId!, redNum, blueNum);
+    } catch {
+      setSubmitting(false);
+    }
   }
 
   function handleScoreChange(
@@ -89,10 +95,10 @@ export function LiveMatchPage(): React.ReactElement {
 
       <button
         onClick={handleFinish}
-        disabled={!validScore}
+        disabled={!validScore || submitting}
         className="w-full py-3 bg-gray-800 text-white rounded-lg font-medium hover:bg-gray-900 disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        Finish Match
+        {submitting ? 'Finishing…' : 'Finish Match'}
       </button>
     </div>
   );
