@@ -4,6 +4,7 @@ import { Timestamp } from 'firebase/firestore';
 import { DndContext, useDraggable, useDroppable, DragOverlay, useSensor, useSensors, MouseSensor, TouchSensor, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { useMatchStore } from '../stores/matchStore.ts';
 import { useAuthStore } from '../stores/authStore.ts';
+import { isValidFinalScore } from '../utils/elo.ts';
 import type { Match, TeamSlot, User } from '../types/index.ts';
 
 function DraggablePlayer({ uid, username }: { uid: string; username: string }): React.ReactElement {
@@ -175,7 +176,7 @@ export function EditMatchPage(): React.ReactElement {
 
       <button
         onClick={handleSave}
-        disabled={saving || redScore === blueScore}
+        disabled={saving || !isValidFinalScore(redScore, blueScore)}
         className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
       >
         {saving ? 'Saving...' : 'Save Changes'}
