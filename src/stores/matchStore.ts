@@ -201,9 +201,12 @@ export const useMatchStore = create<MatchState>((set, _get) => ({
   },
 
   completeMatch: async (matchId, redScore, blueScore) => {
-    const seasonId = formatSeasonId(new Date());
-
     await runTransaction(db, async (txn) => {
+      const configSnap = await txn.get(doc(db, 'config', 'seasons'));
+      const seasonId = configSnap.exists()
+        ? (configSnap.data() as { currentSeasonId: string }).currentSeasonId
+        : formatSeasonId(new Date());
+
       const matchRef = doc(db, 'matches', matchId);
       const matchSnap = await txn.get(matchRef);
       if (!matchSnap.exists()) throw new Error('Match not found');
