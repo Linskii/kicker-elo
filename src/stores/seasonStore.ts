@@ -120,6 +120,20 @@ export const useSeasonStore = create<SeasonState>((set, get) => ({
       const label = formatSeasonLabel(currentSeasonId);
       const [yearStr, monthStr] = currentSeasonId.split('-');
 
+      // Pick a new season ID that doesn't clash with the closed one or existing snapshots
+      // Must do all reads before any writes in a Firestore transaction
+      const baseId = formatSeasonId(new Date());
+      let newSeasonId = baseId;
+      let counter = 2;
+      while (true) {
+        if (newSeasonId !== currentSeasonId) {
+          const existing = await txn.get(doc(db, 'seasons', newSeasonId));
+          if (!existing.exists()) break;
+        }
+        newSeasonId = `${baseId}-${counter}`;
+        counter++;
+      }
+
       // Write season document
       txn.set(doc(db, 'seasons', currentSeasonId), {
         id: currentSeasonId,
@@ -132,18 +146,6 @@ export const useSeasonStore = create<SeasonState>((set, get) => ({
         soloLeaderboard,
       });
 
-      // Pick a new season ID that doesn't clash with the closed one or existing snapshots
-      const baseId = formatSeasonId(new Date());
-      let newSeasonId = baseId;
-      let counter = 2;
-      while (true) {
-        if (newSeasonId !== currentSeasonId) {
-          const existing = await txn.get(doc(db, 'seasons', newSeasonId));
-          if (!existing.exists()) break;
-        }
-        newSeasonId = `${baseId}-${counter}`;
-        counter++;
-      }
       txn.update(configRef, { currentSeasonId: newSeasonId });
 
       // Reset all users — must use batch outside transaction
