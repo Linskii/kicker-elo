@@ -32,8 +32,8 @@ export function EditMatchPage(): React.ReactElement {
   const user = useAuthStore((s) => s.user);
   const { match, participants, subscribeToMatch, editCompletedMatch } = useMatchStore();
   const [localSlots, setLocalSlots] = useState<Record<string, string | null>>({});
-  const [redScore, setRedScore] = useState(0);
-  const [blueScore, setBlueScore] = useState(0);
+  const [redScore, setRedScore] = useState('0');
+  const [blueScore, setBlueScore] = useState('0');
   const [activeId, setActiveId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const sensors = useSensors(
@@ -68,8 +68,8 @@ export function EditMatchPage(): React.ReactElement {
       playerRed: match.playerRed,
       playerBlue: match.playerBlue,
     });
-    setRedScore(match.redScore);
-    setBlueScore(match.blueScore);
+    setRedScore(String(match.redScore));
+    setBlueScore(String(match.blueScore));
     setInitialized(true);
   }, [match, initialized, matchId, navigate]);
 
@@ -117,7 +117,7 @@ export function EditMatchPage(): React.ReactElement {
       for (const slot of slotsConfig) {
         (newSlots as Record<string, string | null>)[slot.id] = localSlots[slot.id] ?? null;
       }
-      await editCompletedMatch(matchId!, newSlots, redScore, blueScore);
+      await editCompletedMatch(matchId!, newSlots, Number(redScore), Number(blueScore));
       navigate(`/match/${matchId}/result`, { replace: true });
     } catch {
       setSaving(false);
@@ -157,7 +157,7 @@ export function EditMatchPage(): React.ReactElement {
             type="number"
             min={0}
             value={redScore}
-            onChange={(e) => setRedScore(Number(e.target.value))}
+            onChange={(e) => setRedScore(e.target.value)}
             className="block w-20 mx-auto text-center border rounded px-2 py-1 text-lg font-bold"
           />
         </div>
@@ -168,7 +168,7 @@ export function EditMatchPage(): React.ReactElement {
             type="number"
             min={0}
             value={blueScore}
-            onChange={(e) => setBlueScore(Number(e.target.value))}
+            onChange={(e) => setBlueScore(e.target.value)}
             className="block w-20 mx-auto text-center border rounded px-2 py-1 text-lg font-bold"
           />
         </div>
@@ -176,7 +176,7 @@ export function EditMatchPage(): React.ReactElement {
 
       <button
         onClick={handleSave}
-        disabled={saving || !isValidFinalScore(redScore, blueScore)}
+        disabled={saving || redScore === '' || blueScore === '' || !isValidFinalScore(Number(redScore), Number(blueScore))}
         className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
       >
         {saving ? 'Saving...' : 'Save Changes'}
