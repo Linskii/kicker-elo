@@ -25,7 +25,7 @@ import type {
 } from '../types/index.ts';
 import {
   marginMultiplier,
-  calculateEloChange,
+  calculateZeroSumChange,
   computeNewRating,
   getKFactor,
   isTeamRanked,
@@ -252,14 +252,10 @@ export const useMatchStore = create<MatchState>((set, _get) => ({
         const redK = getKFactor(seasonStatsDocs[redUid]?.soloMatchesPlayed ?? 0);
         const blueK = getKFactor(seasonStatsDocs[blueUid]?.soloMatchesPlayed ?? 0);
 
-        const redActual = redWon ? 1 : 0;
-        const blueActual = redWon ? 0 : 1;
+        const redDelta = calculateZeroSumChange(redElo, blueElo, redWon, redK, blueK, mult);
 
-        const redChange = calculateEloChange(redElo, blueElo, redActual, redK, mult);
-        const blueChange = calculateEloChange(blueElo, redElo, blueActual, blueK, mult);
-
-        eloChanges[redUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: redChange };
-        eloChanges[blueUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: blueChange };
+        eloChanges[redUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: redDelta };
+        eloChanges[blueUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: -redDelta };
       } else {
         const redAtkUid = match.redAttacker!;
         const redDefUid = match.redDefender!;
@@ -269,41 +265,20 @@ export const useMatchStore = create<MatchState>((set, _get) => ({
         const redTeamRating = (userDocs[redAtkUid].attackElo + userDocs[redDefUid].defenseElo) / 2;
         const blueTeamRating = (userDocs[blueAtkUid].attackElo + userDocs[blueDefUid].defenseElo) / 2;
 
-        const redActual = redWon ? 1 : 0;
-        const blueActual = redWon ? 0 : 1;
-
-        // Attackers
+        // Attackers — zero-sum pair
         const redAtkK = getKFactor(seasonStatsDocs[redAtkUid]?.attackMatchesPlayed ?? 0);
         const blueAtkK = getKFactor(seasonStatsDocs[blueAtkUid]?.attackMatchesPlayed ?? 0);
-        const redAtkChange = calculateEloChange(redTeamRating, blueTeamRating, redActual, redAtkK, mult);
-        const blueAtkChange = calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueAtkK, mult);
+        const atkDelta = calculateZeroSumChange(redTeamRating, blueTeamRating, redWon, redAtkK, blueAtkK, mult);
 
-        // Defenders
+        // Defenders — zero-sum pair
         const redDefK = getKFactor(seasonStatsDocs[redDefUid]?.defenseMatchesPlayed ?? 0);
         const blueDefK = getKFactor(seasonStatsDocs[blueDefUid]?.defenseMatchesPlayed ?? 0);
-        const redDefChange = calculateEloChange(redTeamRating, blueTeamRating, redActual, redDefK, mult);
-        const blueDefChange = calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueDefK, mult);
+        const defDelta = calculateZeroSumChange(redTeamRating, blueTeamRating, redWon, redDefK, blueDefK, mult);
 
-        eloChanges[redAtkUid] = {
-          attackEloDelta: redAtkChange,
-          defenseEloDelta: 0,
-          soloEloDelta: 0,
-        };
-        eloChanges[redDefUid] = {
-          attackEloDelta: 0,
-          defenseEloDelta: redDefChange,
-          soloEloDelta: 0,
-        };
-        eloChanges[blueAtkUid] = {
-          attackEloDelta: blueAtkChange,
-          defenseEloDelta: 0,
-          soloEloDelta: 0,
-        };
-        eloChanges[blueDefUid] = {
-          attackEloDelta: 0,
-          defenseEloDelta: blueDefChange,
-          soloEloDelta: 0,
-        };
+        eloChanges[redAtkUid] = { attackEloDelta: atkDelta, defenseEloDelta: 0, soloEloDelta: 0 };
+        eloChanges[redDefUid] = { attackEloDelta: 0, defenseEloDelta: defDelta, soloEloDelta: 0 };
+        eloChanges[blueAtkUid] = { attackEloDelta: -atkDelta, defenseEloDelta: 0, soloEloDelta: 0 };
+        eloChanges[blueDefUid] = { attackEloDelta: 0, defenseEloDelta: -defDelta, soloEloDelta: 0 };
       }
 
       // Write match
@@ -423,11 +398,10 @@ export const useMatchStore = create<MatchState>((set, _get) => ({
         const redK = getKFactor((seasonStatsDocs[redUid]?.soloMatchesPlayed ?? 1) - 1);
         const blueK = getKFactor((seasonStatsDocs[blueUid]?.soloMatchesPlayed ?? 1) - 1);
 
-        const redChange = calculateEloChange(redElo, blueElo, newRedWon ? 1 : 0, redK, mult);
-        const blueChange = calculateEloChange(blueElo, redElo, newRedWon ? 0 : 1, blueK, mult);
+        const redDelta = calculateZeroSumChange(redElo, blueElo, newRedWon, redK, blueK, mult);
 
-        newEloChanges[redUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: redChange };
-        newEloChanges[blueUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: blueChange };
+        newEloChanges[redUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: redDelta };
+        newEloChanges[blueUid] = { attackEloDelta: 0, defenseEloDelta: 0, soloEloDelta: -redDelta };
       } else {
         const redAtkUid = updatedMatch.redAttacker!;
         const redDefUid = updatedMatch.redDefender!;
@@ -437,18 +411,18 @@ export const useMatchStore = create<MatchState>((set, _get) => ({
         const redTeamRating = (preMatchElos[redAtkUid].attackElo + preMatchElos[redDefUid].defenseElo) / 2;
         const blueTeamRating = (preMatchElos[blueAtkUid].attackElo + preMatchElos[blueDefUid].defenseElo) / 2;
 
-        const redActual = newRedWon ? 1 : 0;
-        const blueActual = newRedWon ? 0 : 1;
-
         const redAtkK = getKFactor((seasonStatsDocs[redAtkUid]?.attackMatchesPlayed ?? 1) - 1);
         const blueAtkK = getKFactor((seasonStatsDocs[blueAtkUid]?.attackMatchesPlayed ?? 1) - 1);
         const redDefK = getKFactor((seasonStatsDocs[redDefUid]?.defenseMatchesPlayed ?? 1) - 1);
         const blueDefK = getKFactor((seasonStatsDocs[blueDefUid]?.defenseMatchesPlayed ?? 1) - 1);
 
-        newEloChanges[redAtkUid] = { attackEloDelta: calculateEloChange(redTeamRating, blueTeamRating, redActual, redAtkK, mult), defenseEloDelta: 0, soloEloDelta: 0 };
-        newEloChanges[redDefUid] = { attackEloDelta: 0, defenseEloDelta: calculateEloChange(redTeamRating, blueTeamRating, redActual, redDefK, mult), soloEloDelta: 0 };
-        newEloChanges[blueAtkUid] = { attackEloDelta: calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueAtkK, mult), defenseEloDelta: 0, soloEloDelta: 0 };
-        newEloChanges[blueDefUid] = { attackEloDelta: 0, defenseEloDelta: calculateEloChange(blueTeamRating, redTeamRating, blueActual, blueDefK, mult), soloEloDelta: 0 };
+        const atkDelta = calculateZeroSumChange(redTeamRating, blueTeamRating, newRedWon, redAtkK, blueAtkK, mult);
+        const defDelta = calculateZeroSumChange(redTeamRating, blueTeamRating, newRedWon, redDefK, blueDefK, mult);
+
+        newEloChanges[redAtkUid] = { attackEloDelta: atkDelta, defenseEloDelta: 0, soloEloDelta: 0 };
+        newEloChanges[redDefUid] = { attackEloDelta: 0, defenseEloDelta: defDelta, soloEloDelta: 0 };
+        newEloChanges[blueAtkUid] = { attackEloDelta: -atkDelta, defenseEloDelta: 0, soloEloDelta: 0 };
+        newEloChanges[blueDefUid] = { attackEloDelta: 0, defenseEloDelta: -defDelta, soloEloDelta: 0 };
       }
 
       // Update match document

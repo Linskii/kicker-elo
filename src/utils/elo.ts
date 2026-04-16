@@ -27,16 +27,25 @@ export function marginMultiplier(winnerScore: number, loserScore: number): numbe
   );
 }
 
-export function calculateEloChange(
+/**
+ * Zero-sum ELO change. Returns the integer delta for player A;
+ * player B's delta is always the exact negation (−result).
+ * K-factors are averaged so placement volatility is shared fairly.
+ */
+export function calculateZeroSumChange(
   ratingA: number,
   ratingB: number,
-  actualA: number,
-  k: number,
+  aWon: boolean,
+  kA: number,
+  kB: number,
   multiplier: number,
 ): number {
+  const kAvg = (kA + kB) / 2;
   const expectedA = 1 / (1 + Math.pow(10, (ratingB - ratingA) / ELO_CONFIG.C));
-  const change = k * (actualA - expectedA) * multiplier;
-  return Math.max(-ELO_CONFIG.MAX_ELO_CHANGE, Math.min(ELO_CONFIG.MAX_ELO_CHANGE, change));
+  const actualA = aWon ? 1 : 0;
+  const raw = kAvg * (actualA - expectedA) * multiplier;
+  const clamped = Math.max(-ELO_CONFIG.MAX_ELO_CHANGE, Math.min(ELO_CONFIG.MAX_ELO_CHANGE, raw));
+  return Math.round(clamped);
 }
 
 export function computeNewRating(oldRating: number, change: number): number {
@@ -73,7 +82,7 @@ export function computeTeamElo(
 export function isTeamRanked(stats: SeasonStatsLike | null): boolean {
   const req = ELO_CONFIG.PLACEMENT_MATCHES_REQUIRED;
   return (
-    (stats?.attackMatchesPlayed ?? 0) >= req || (stats?.defenseMatchesPlayed ?? 0) >= req
+    (stats?.attackMatchesPlayed ?? 0) >= req && (stats?.defenseMatchesPlayed ?? 0) >= req
   );
 }
 
